@@ -1,7 +1,7 @@
 # 💬 KakaoTalk Layout AdBlocker v11 (Rust Native)
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.2-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.3-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
 
@@ -16,7 +16,7 @@
 ## 📑 목차
 
 - [✨ 핵심 특징 (Key Highlights)](#-핵심-특징-key-highlights)
-- [🦀 Rust 네이티브 개편 안내 (v11.1.2)](#-rust-네이티브-개편-안내-v1112)
+- [🦀 Rust 네이티브 개편 안내 (v11.1.3)](#-rust-네이티브-개편-안내-v1113)
 - [🚀 빠른 시작 (3단계 사용법)](#-빠른-시작-3단계-사용법)
 - [🖥️ 시스템 트레이 사용 가이드](#️-시스템-트레이-사용-가이드)
 - [🧠 동작 원리 (Layout-Only 차단)](#-동작-원리-layout-only-차단)
@@ -50,11 +50,11 @@
 
 ---
 
-## 🦀 Rust 네이티브 개편 안내 (v11.1.2)
+## 🦀 Rust 네이티브 개편 안내 (v11.1.3)
 
-v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전면 재구축**되었으며, v11.1.1에서 **초저지연/초저전력 CPU 최적화**가 완료되었고, v11.1.2에서 감사 지적 사항(창 트리 깊이, 팝업 재노출, 설정 타입 오류, 업데이트/트레이 종료 경로)을 수정했습니다.
+v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전면 재구축**되었으며, v11.1.1에서 **초저지연/초저전력 CPU 최적화**가 완료되었고, v11.1.2에서 감사 지적 사항을 수정했으며, v11.1.3에서 **시작프로그램 재부팅 미실행**을 고쳤습니다.
 
-| 구분 | 이전 (Python v11 / PyInstaller) | 개편 후 (Rust v11.1.2 네이티브) |
+| 구분 | 이전 (Python v11 / PyInstaller) | 개편 후 (Rust v11.1.3 네이티브) |
 | :--- | :--- | :--- |
 | **런타임 의존성** | Python 인터프리터 임베딩 + Tkinter | **0 (순수 Win32 네이티브 API 바이너리)** |
 | **메모리 점유율** | 약 30MB ~ 60MB | **약 3MB ~ 8MB (최대 90% 절감)** |
@@ -118,6 +118,7 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
    - 기본 윈도우 시그니처 외에도 창 하위 요소 중 광고 토큰(`Ad`, `AdFit`, `광고` 등)이 포함된 요소를 추가로 식별하여 차단합니다. (기본값: **활성화**)
 3. **시작프로그램 등록**
    - 체크 시 Windows 레지스트리(`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`)에 `--startup-launch --minimized` 인자로 등록되어 부팅 시 화면 깜빡임 없이 트레이로 바로 시작됩니다.
+   - 로그온 직후 Explorer 트레이가 아직 없어도 셸이 준비될 때까지 기다린 뒤 아이콘을 붙입니다. EXE를 옮겼거나 Windows 시작 앱에서 꺼진 경우에는 다음 실행 때 등록을 자동 복구합니다.
 4. **복원 실패 초기화**
    - 카카오톡 비정상 종료 등으로 발생할 수 있는 창 원복 재시도 큐를 수동으로 초기화합니다.
 5. **로그 폴더 열기**
@@ -298,6 +299,10 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 
 ### Q4. 백신 프로그램(Windows Defender 등)에서 오탐(False Positive)하나요?
 - 관리자 권한을 요구하지 않고 시스템 영역을 전혀 건드리지 않는 순수 오픈소스 바이너리입니다. 만약 알 수 없는 게시자 경고(SmartScreen)가 뜬다면 **[추가 정보] -> [실행]**을 눌러 주시면 정상 동작합니다.
+
+### Q5. 시작프로그램에 등록했는데 재부팅하면 실행이 안 됩니다.
+- v11.1.3부터 로그온 직후 트레이 준비 지연, 옮긴 EXE 경로, Windows 시작 앱 꺼짐 상태를 복구합니다. **이 버전을 한 번 실행**해 두면 기존 등록이 현재 EXE와 허용 상태에 맞춰집니다.
+- 그래도 안 되면 작업 관리자 → 시작앱에서 `KakaoTalkAdBlockerLayout`이 켜져 있는지 확인하고, 트레이에서 **시작프로그램 등록**을 다시 체크하세요.
 
 ---
 

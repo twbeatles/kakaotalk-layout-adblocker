@@ -7,7 +7,7 @@ use kakao_core::{LayoutRules, LayoutSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const VERSION: &str = "11.1.2";
+pub const VERSION: &str = "11.1.3";
 pub const APPDATA_DIRNAME: &str = "KakaoTalkAdBlockerLayout";
 pub const SETTINGS_FILE: &str = "layout_settings_v11.json";
 pub const RULES_FILE: &str = "layout_rules_v11.json";

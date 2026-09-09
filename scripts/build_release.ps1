@@ -282,11 +282,17 @@ try {
                 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsarm64_amd64.bat",
                 "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
                 "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
-                "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+                "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+                "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+                "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
             )
             $vcvars = $vcvarsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
             if ($vcvars) {
-                cmd.exe /c "`"$vcvars`" && rustup run stable-x86_64-pc-windows-msvc cargo build --release -p kakao-app -p kakao-updater"
+                $vcvarsSuffix = ""
+                if ([IO.Path]::GetFileName($vcvars) -ieq "vcvarsall.bat") {
+                    $vcvarsSuffix = " x64"
+                }
+                cmd.exe /c "`"$vcvars`"$vcvarsSuffix && rustup run stable-x86_64-pc-windows-msvc cargo build --release -p kakao-app -p kakao-updater"
             } else {
                 rustup run stable-x86_64-pc-windows-msvc cargo build --release -p kakao-app -p kakao-updater
             }

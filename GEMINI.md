@@ -28,6 +28,7 @@
 ## Runtime Entry
 
 - Main binary: `dist/KakaoTalkLayoutAdBlocker_v11.exe` (`rust/crates/kakao-app`)
+- HKCU Run startup: wait for `Shell_TrayWnd`, retry `NIM_ADD`, keep the tray message loop if the icon is still missing, then re-add on `TaskbarCreated`/timer. Repair missing/stale/missing-target Run commands and re-enable `StartupApproved` when `run_on_startup` is set.
 - Python reference: `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
 - Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
 - `--dump-tree` runs in a lightweight path without UI/tray module import. Child trees go in `windows`; owned popup ad hosts go in `owned_popups`. Graph child edges are direct children (`GetParent`), not flattened `EnumChildWindows` descendants.

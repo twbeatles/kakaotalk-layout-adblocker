@@ -3,7 +3,7 @@
 ## 개요
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
-- 버전: `11.1.2`
+- 버전: `11.1.3`
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
@@ -32,6 +32,7 @@
 
 - 실행(기본): `dist/KakaoTalkLayoutAdBlocker_v11.exe` 또는 `cargo run -p kakao-app --release`
 - 소스: `rust/crates/kakao-app` (`kakao-adblock-rs`)
+- 시작프로그램(Rust): HKCU Run + `StartupApproved`. 트레이 시작 전 `Shell_TrayWnd` 대기, NIM_ADD 재시도, 실패해도 메시지 루프 유지 후 `TaskbarCreated`/타이머 재등록. `run_on_startup`이면 missing/stale/missing_target Run 명령을 현재 EXE로 복구하고, Windows가 꺼 둔 시작 앱 상태를 다시 켠다. cargo 소스 실행은 존재하는 패키지 EXE 등록을 덮어쓰지 않는다.
 - 루트 `kakaotalk_layout_adblock_v11.py`는 Rust EXE 안내만 출력하고 종료 코드 `0`
 - Python 참고 구현: `legacy/python-v11/kakao_adblocker`, 엔트리 `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
 - 정적 분석: `pyrightconfig.json` extraPaths=`legacy/python-v11`, include=`legacy/python-v11/kakao_adblocker`, `tests`

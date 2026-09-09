@@ -4,6 +4,17 @@
 대상: KakaoTalk Layout AdBlocker 11.1.1 / commit `b3f2d18fcca005a590e4a1aa6d3797eb5b6d3a61`
 감사 방식: 문서 → CodeGraph MCP → 누락 부분 소스 확인 → 기존 테스트 및 격리 재현 → 반증 확인. 기존 감사 문서를 현재 구현 기준으로 갱신했다. 소스·설정·빌드 스크립트는 수정하지 않았다.
 
+## Remediation status (v11.1.3)
+
+2026-09-09 구현으로 시작프로그램 재부팅 미실행 경로를 보완했다. 아래 11.1.1 감사 본문은 당시 기록으로 유지한다.
+
+| 항목 | v11.1.3 |
+|---|---|
+| 로그온 NIM_ADD 실패 후 즉시 종료 | 수정. `Shell_TrayWnd` 대기, 수 초 NIM_ADD 재시도, 실패 시에도 메시지 루프 유지 후 `TaskbarCreated`/타이머 재등록. |
+| 낡은/누락 EXE Run 경로를 source-compatible로 오인 | 수정. `missing_target`/`stale`은 현재 EXE로 복구. source-compatible는 패키지 EXE가 실제로 있을 때만. |
+| Windows `StartupApproved` disabled | 수정. Run 등록 시 enable blob 기록. healthy 등록도 꺼진 시작 앱 상태를 다시 켬. |
+| `\\?\` Run 경로 | 수정. `current_exe` 경로에서 접두사 제거. |
+
 ## Remediation status (v11.1.2)
 
 2026-09-06 구현으로 아래 항목을 반영했다. 이 문서는 11.1.1 시점의 감사 기록으로 유지한다.

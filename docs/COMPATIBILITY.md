@@ -1,7 +1,7 @@
 # Compatibility Matrix (호환성 매트릭스)
 
 > 대상: KakaoTalk Layout AdBlocker v11.1.x (Rust Native)  
-> 최종 업데이트: 2026-09-03
+> 최종 업데이트: 2026-09-09
 
 ## 1. 운영체제 및 디스플레이 환경
 
@@ -32,7 +32,7 @@
 | **공격 모드 (Aggressive Mode) ON/OFF** | 토글 즉시 공격 모드 숨김 창 복원 및 재스캔 적용. | **PASS** | `SharedFlags`, `restore_stale_hidden` |
 | **차단기 끄기 (Blocker OFF)** | 숨김 및 zero-size 처리된 광고 창을 원래 상태로 `SW_SHOW` 복원. 메인 뷰는 카카오톡 자체 레이아웃에 위임. | **PASS** | `hidden_ad_restored_on_disable` |
 | **차단기 종료 (Exit)** | 모든 변경 창 안전 복원 후 트레이 및 백그라운드 워커 종료. | **PASS** | `restore_all`, `stopping` flag |
-| **Windows 로그인 시작프로그램** | HKCU Run 레지스트리에 `--startup-launch --minimized`로 등록되어 부팅 시 트레이로 시작. | **PASS** | `kakao_win32::startup` |
+| **Windows 로그인 시작프로그램** | HKCU Run에 `--startup-launch --minimized`로 등록. 로그온 시 `Shell_TrayWnd` 대기·NIM_ADD 재시도·`TaskbarCreated` 재등록. 낡은/누락 EXE 경로와 `StartupApproved` 꺼짐은 다음 실행 때 복구. | **PASS** | `kakao_win32::startup`, `tray.rs`, `kakao-app/src/startup.rs` |
 | **중복 실행 방지 (Single Instance)** | 커널 Named Mutex로 2번째 실행 시 기존 인스턴스 보존 및 콘솔/대화상자 안내 후 즉시 종료(0). | **PASS** | `single_instance.rs`, `lib.rs` |
 | **자동 업데이트 확인 및 적용** | Ed25519 서명 검증 -> 임시 다운로드 -> `kakao-updater` 헬퍼 실행 -> 안전 교체 및 자동 재시작. | **PASS** | `updater_tests.rs`, `updater.rs` |
 

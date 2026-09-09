@@ -718,7 +718,7 @@ legacy Python의 pyright/pytest도 계속 통과해야 한다.
 - [ ] KakaoTalk 재실행 정상
 - [ ] black screen 재발 없음
 - [ ] single instance 정상
-- [ ] startup 정상
+- [x] startup 정상 (v11.1.3: 로그온 트레이 대기/재시도, stale Run 복구, StartupApproved)
 - [ ] update check 정상
 - [ ] 이전 release → 새 release 실제 update 성공
 - [ ] update 후 자동 재실행

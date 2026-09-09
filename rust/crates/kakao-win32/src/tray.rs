@@ -3,6 +3,7 @@
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -12,12 +13,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, GetWindowLongPtrW, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
-    SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA,
-    IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, TPM_RIGHTBUTTON,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_RBUTTONUP,
-    WNDCLASSW,
+    DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, GetWindowLongPtrW, KillTimer,
+    LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
+    SetForegroundWindow, SetTimer, SetWindowLongPtrW, TrackPopupMenu, TranslateMessage, CS_HREDRAW,
+    CS_VREDRAW, GWLP_USERDATA, IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+    MSG, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_COMMAND, WM_CONTEXTMENU,
+    WM_DESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
 };
 
 // MAKEINTRESOURCE(1): first ICON resource embedded by kakao-app/build.rs.
@@ -27,6 +28,9 @@ fn app_icon_resource() -> PCWSTR {
 }
 
 const WM_TRAY: u32 = WM_APP + 1;
+const TRAY_RETRY_TIMER_ID: usize = 1;
+const SHELL_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+const SHELL_WAIT_POLL: Duration = Duration::from_millis(500);
 static TRAY_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 pub const ID_TOGGLE_ENABLED: u32 = 1001;
 pub const ID_TOGGLE_AGGRESSIVE: u32 = 1002;
@@ -79,6 +83,74 @@ where
     on_command: F,
     nid: NOTIFYICONDATAW,
     taskbar_created: u32,
+    icon_added: bool,
+}
+
+pub fn wait_for_shell_ready_with(
+    timeout: Duration,
+    poll: Duration,
+    required_hits: u32,
+    mut is_ready: impl FnMut() -> bool,
+    mut sleep_fn: impl FnMut(Duration),
+    mut elapsed: impl FnMut() -> Duration,
+) -> bool {
+    let timeout = timeout.max(Duration::ZERO);
+    let poll = poll.max(Duration::from_millis(50));
+    let required_hits = required_hits.max(1);
+    let mut hits = 0u32;
+    while elapsed() < timeout {
+        if is_ready() {
+            hits += 1;
+            if hits >= required_hits {
+                return true;
+            }
+        } else {
+            hits = 0;
+        }
+        sleep_fn(poll);
+    }
+    is_ready()
+}
+
+pub fn wait_for_shell_ready(timeout: Duration, poll: Duration) -> bool {
+    if shell_tray_present() {
+        return true;
+    }
+    let start = Instant::now();
+    wait_for_shell_ready_with(
+        timeout,
+        poll,
+        2,
+        shell_tray_present,
+        std::thread::sleep,
+        || start.elapsed(),
+    )
+}
+
+pub fn notify_icon_retry_delays() -> &'static [Duration] {
+    const DELAYS: &[Duration] = &[
+        Duration::from_millis(100),
+        Duration::from_millis(250),
+        Duration::from_millis(500),
+        Duration::from_millis(1000),
+        Duration::from_millis(2000),
+        Duration::from_millis(4000),
+    ];
+    DELAYS
+}
+
+pub fn continue_message_loop_without_icon() -> bool {
+    true
+}
+
+fn shell_tray_present() -> bool {
+    unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }
+        .ok()
+        .is_some_and(|hwnd| !hwnd.0.is_null())
+}
+
+fn try_add_notify_icon(nid: &NOTIFYICONDATAW) -> bool {
+    unsafe { Shell_NotifyIconW(NIM_ADD, nid).as_bool() }
 }
 
 pub fn run_loop<F>(flags: TrayFlags, on_command: F) -> Result<(), String>
@@ -114,6 +186,10 @@ where
     F: FnMut(TrayCommand),
     R: FnOnce(),
 {
+    if !shell_tray_present() {
+        let _ = wait_for_shell_ready(SHELL_WAIT_TIMEOUT, SHELL_WAIT_POLL);
+    }
+
     let instance = GetModuleHandleW(None).map_err(|err| err.to_string())?;
     let icon = load_app_icon(instance.into())?;
     let class = w!("KakaoTalkLayoutAdBlockerTray");
@@ -153,27 +229,36 @@ where
         ..Default::default()
     };
     write_tip(&mut nid, "KakaoTalk Layout AdBlocker");
-    let mut added = Shell_NotifyIconW(NIM_ADD, &nid).as_bool();
+    let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
+    let mut added = try_add_notify_icon(&nid);
     if !added {
-        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        added = Shell_NotifyIconW(NIM_ADD, &nid).as_bool();
+        for delay in notify_icon_retry_delays() {
+            let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+            std::thread::sleep(*delay);
+            if try_add_notify_icon(&nid) {
+                added = true;
+                break;
+            }
+        }
     }
-    if !added {
+    if !added && !continue_message_loop_without_icon() {
         let err = windows::Win32::Foundation::GetLastError();
         let _ = DestroyWindow(hwnd);
         return Err(format!("Shell_NotifyIconW NIM_ADD failed: {err:?}"));
     }
 
-    let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
     TRAY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
     let mut host = TrayHost {
         flags,
         on_command,
         nid,
         taskbar_created,
+        icon_added: added,
     };
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of_mut!(host) as isize);
+    if !added {
+        let _ = SetTimer(Some(hwnd), TRAY_RETRY_TIMER_ID, 2000, None);
+    }
     if let Some(on_ready) = on_ready {
         on_ready();
     }
@@ -223,15 +308,32 @@ unsafe extern "system" fn wnd_proc<F: FnMut(TrayCommand)>(
         WM_DESTROY => {
             unsafe {
                 TRAY_HWND.store(0, Ordering::SeqCst);
+                let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
                 let _ = Shell_NotifyIconW(NIM_DELETE, &(*host).nid);
                 PostQuitMessage(0);
+            }
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            unsafe {
+                if wparam.0 == TRAY_RETRY_TIMER_ID && !(*host).icon_added {
+                    let added = Shell_NotifyIconW(NIM_ADD, &(*host).nid).as_bool();
+                    (*host).icon_added = added;
+                    if added {
+                        let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
+                    }
+                }
             }
             LRESULT(0)
         }
         msg if msg == unsafe { (*host).taskbar_created } && msg != 0 => {
             unsafe {
                 let _ = Shell_NotifyIconW(NIM_DELETE, &(*host).nid);
-                let _ = Shell_NotifyIconW(NIM_ADD, &(*host).nid);
+                let added = Shell_NotifyIconW(NIM_ADD, &(*host).nid).as_bool();
+                (*host).icon_added = added;
+                if added {
+                    let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
+                }
             }
             LRESULT(0)
         }
@@ -347,6 +449,7 @@ pub fn shell_open(target: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn menu_ids_map_to_commands() {
@@ -356,5 +459,63 @@ mod tests {
         );
         assert_eq!(TrayCommand::from_id(ID_EXIT), Some(TrayCommand::Exit));
         assert_eq!(TrayCommand::from_id(0), None);
+    }
+
+    #[test]
+    fn wait_for_shell_ready_requires_two_consecutive_hits() {
+        let mut calls = 0u32;
+        let mut now = Duration::ZERO;
+        let ok = wait_for_shell_ready_with(
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+            2,
+            || {
+                calls += 1;
+                calls >= 2
+            },
+            |_| {},
+            || {
+                now += Duration::from_millis(100);
+                now
+            },
+        );
+        assert!(ok);
+        assert!(calls >= 2);
+    }
+
+    #[test]
+    fn wait_for_shell_ready_resets_hits_after_a_gap() {
+        let states = [false, true, false, true, true];
+        let mut index = 0usize;
+        let mut now = Duration::ZERO;
+        let ok = wait_for_shell_ready_with(
+            Duration::from_secs(2),
+            Duration::from_millis(100),
+            2,
+            || {
+                let ready = states.get(index).copied().unwrap_or(true);
+                index += 1;
+                ready
+            },
+            |_| {},
+            || {
+                now += Duration::from_millis(100);
+                now
+            },
+        );
+        assert!(ok);
+        assert!(index >= 5);
+    }
+
+    #[test]
+    fn notify_icon_retries_cover_logon_delay() {
+        let total: Duration = notify_icon_retry_delays().iter().copied().sum();
+        assert!(total >= Duration::from_secs(5));
+        assert!(notify_icon_retry_delays().len() >= 4);
+    }
+
+    #[test]
+    fn tray_keeps_message_loop_when_notify_icon_add_fails() {
+        assert!(continue_message_loop_without_icon());
     }
 }
