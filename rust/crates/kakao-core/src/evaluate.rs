@@ -153,8 +153,11 @@ impl MutationLog {
         ]);
     }
 
+    /// Empty `EVA_ChildWindow` close request. Popup dismissals are counted by
+    /// `popup_close_requests` instead, so `closed` stays specific to this path.
     fn send_close(&mut self, hwnd: Hwnd) {
         self.close.push(hwnd);
+        self.closed += 1;
     }
 
     fn send_popup_close(&mut self, hwnd: Hwnd) {
@@ -669,17 +672,17 @@ fn retain_popup(log: &mut MutationLog, hwnd: Hwnd, visible: bool) {
     }
 }
 
+/// A currently visible popup ad: request `WM_CLOSE`, then plan the hide and
+/// zero-size fallbacks that keep it suppressed if the window refuses to close.
+/// `retain_popup` only routes visible popups here, so both fallbacks are always
+/// planned — the engine logs whether `WM_CLOSE` actually destroyed the window.
 fn dismiss_popup(log: &mut MutationLog, hwnd: Hwnd) {
     log.send_popup_close(hwnd);
     log.hide_window(hwnd);
-    let hidden_ok = log.visible.get(&hwnd).copied() == Some(false);
-    let hide_fallbacks = i64::from(hidden_ok);
     log.set_pos(hwnd, 0, 0, 0, 0);
-    log.popup_hide_fallbacks += hide_fallbacks;
+    log.popup_hide_fallbacks += 1;
     log.popup_zero_size_fallbacks += 1;
-    if hidden_ok {
-        log.hidden += 1;
-    }
+    log.hidden += 1;
 }
 
 fn keep_hidden_popup(log: &mut MutationLog, hwnd: Hwnd) {
@@ -696,11 +699,39 @@ pub fn evaluate_graph(
     evaluate_graph_with_states(graph, settings, rules, &mut states)
 }
 
+/// Full evaluation including the `candidates` diagnostic payload. Used by
+/// `--dump-tree`, `--dump-tree-series` and `--shadow`.
 pub fn evaluate_graph_with_states(
     graph: &WindowGraph,
     settings: &LayoutSettings,
     rules: &LayoutRules,
     states: &mut HashMap<WindowIdentity, CandidateState>,
+) -> Evaluation {
+    evaluate_inner(graph, settings, rules, states, true)
+}
+
+/// Apply-only evaluation for the engine worker's hot loop.
+///
+/// Building the `candidates` payload costs a second full recursive traversal
+/// (`subtree_contains_ad_token`, `class_name_starts_with`, `find_popup_matches`,
+/// `legacy_signature_kind`) plus a clone of the whole candidate-state map, and
+/// the worker discards the result. `actions` and `state` are byte-identical to
+/// `evaluate_graph_with_states`; only `candidates` is left empty.
+pub fn evaluate_graph_for_apply(
+    graph: &WindowGraph,
+    settings: &LayoutSettings,
+    rules: &LayoutRules,
+    states: &mut HashMap<WindowIdentity, CandidateState>,
+) -> Evaluation {
+    evaluate_inner(graph, settings, rules, states, false)
+}
+
+fn evaluate_inner(
+    graph: &WindowGraph,
+    settings: &LayoutSettings,
+    rules: &LayoutRules,
+    states: &mut HashMap<WindowIdentity, CandidateState>,
+    with_candidates: bool,
 ) -> Evaluation {
     let main_windows = inspect_main_windows(graph, rules);
     let confirmed: Vec<Hwnd> = main_windows
@@ -710,16 +741,20 @@ pub fn evaluate_graph_with_states(
         .collect();
     let confirmed_set: HashSet<Hwnd> = confirmed.iter().copied().collect();
     let candidates = candidate_handles(graph, rules, &confirmed_set);
-    let mut preview_states = states.clone();
-    let candidate_payloads = inspect_candidates(
-        graph,
-        settings,
-        rules,
-        &confirmed,
-        &confirmed_set,
-        &candidates,
-        &mut preview_states,
-    );
+    let candidate_payloads = if with_candidates {
+        let mut preview_states = states.clone();
+        inspect_candidates(
+            graph,
+            settings,
+            rules,
+            &confirmed,
+            &confirmed_set,
+            &candidates,
+            &mut preview_states,
+        )
+    } else {
+        Vec::new()
+    };
     let log = apply_once(
         graph,
         settings,

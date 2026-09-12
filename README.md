@@ -1,7 +1,7 @@
 # 💬 KakaoTalk Layout AdBlocker v11 (Rust Native)
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.3-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.4-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
 
@@ -16,7 +16,7 @@
 ## 📑 목차
 
 - [✨ 핵심 특징 (Key Highlights)](#-핵심-특징-key-highlights)
-- [🦀 Rust 네이티브 개편 안내 (v11.1.3)](#-rust-네이티브-개편-안내-v1113)
+- [🦀 Rust 네이티브 개편 안내 (v11.1.4)](#-rust-네이티브-개편-안내-v1114)
 - [🚀 빠른 시작 (3단계 사용법)](#-빠른-시작-3단계-사용법)
 - [🖥️ 시스템 트레이 사용 가이드](#️-시스템-트레이-사용-가이드)
 - [🧠 동작 원리 (Layout-Only 차단)](#-동작-원리-layout-only-차단)
@@ -50,11 +50,11 @@
 
 ---
 
-## 🦀 Rust 네이티브 개편 안내 (v11.1.3)
+## 🦀 Rust 네이티브 개편 안내 (v11.1.4)
 
-v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전면 재구축**되었으며, v11.1.1에서 **초저지연/초저전력 CPU 최적화**가 완료되었고, v11.1.2에서 감사 지적 사항을 수정했으며, v11.1.3에서 **시작프로그램 재부팅 미실행**을 고쳤습니다.
+v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전면 재구축**되었으며, v11.1.1에서 **초저지연/초저전력 CPU 최적화**가 완료되었고, v11.1.2에서 감사 지적 사항을 수정했으며, v11.1.3에서 **시작프로그램 재부팅 미실행**을 고쳤고, v11.1.4에서 **장기 상주 안정성(로그 회전·복원 재시도)과 트레이 상태 표시**를 보강했습니다.
 
-| 구분 | 이전 (Python v11 / PyInstaller) | 개편 후 (Rust v11.1.3 네이티브) |
+| 구분 | 이전 (Python v11 / PyInstaller) | 개편 후 (Rust v11.1.4 네이티브) |
 | :--- | :--- | :--- |
 | **런타임 의존성** | Python 인터프리터 임베딩 + Tkinter | **0 (순수 Win32 네이티브 API 바이너리)** |
 | **메모리 점유율** | 약 30MB ~ 60MB | **약 3MB ~ 8MB (최대 90% 절감)** |
@@ -95,12 +95,16 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
 작업표시줄 알림 영역(시계 옆)의 아이콘을 **우클릭**하면 직관적인 Win32 네이티브 팝업 메뉴가 나타납니다.
 
 ```text
-  KakaoTalk Layout AdBlocker   ← (헤더)
+  KakaoTalk Layout AdBlocker             ← (헤더)
+  차단 ON · 공격 모드 ON · 메인윈도우 1   ← [상태] 현재 동작 상태
+  누적 숨김 3 · 누적 닫힘 0 · 누적 리사이즈 12
+  복원 실패 2건 (초기화 가능)             ← [상태] 실패가 있을 때만 표시
+  오류: restore show failed hwnd=...     ← [상태] 마지막 오류가 있을 때만 표시
   --------------------------
   차단 끄기 / 차단 켜기         ← [원클릭 토글] 광고 차단 활성화/비활성화 (원복)
 ✓ 공격 모드                    ← [고급] 광고 키워드 토큰 기반 심화 차단
 ✓ 시작프로그램 등록             ← Windows 로그인 시 자동 실행 등록
-  복원 실패 초기화              ← 윈도우 원복 실패 카운터 리셋
+  복원 실패 초기화              ← 윈도우 원복 실패 카운터 리셋 (실패가 있을 때만 활성화)
   --------------------------
   로그 폴더 열기                ← 설정 파일 및 로그 디렉터리 탐색기 열기
   GitHub 릴리스 열기            ← 최신 버전 릴리스 웹페이지 열기
@@ -121,6 +125,7 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
    - 로그온 직후 Explorer 트레이가 아직 없어도 셸이 준비될 때까지 기다린 뒤 아이콘을 붙입니다. EXE를 옮겼거나 Windows 시작 앱에서 꺼진 경우에는 다음 실행 때 등록을 자동 복구합니다.
 4. **복원 실패 초기화**
    - 카카오톡 비정상 종료 등으로 발생할 수 있는 창 원복 재시도 큐를 수동으로 초기화합니다.
+   - 현재 복원에 실패한 창 수는 메뉴 헤더와 트레이 아이콘 툴팁에 표시됩니다. 복원이 반복 실패하면 지수 백오프로 재시도 간격을 늘리므로 로그가 폭증하지 않으며, 이 메뉴로 초기화하면 즉시 다시 시도합니다.
 5. **로그 폴더 열기**
    - 설정 파일(`layout_settings_v11.json`, `layout_rules_v11.json`)과 로그 파일(`layout_adblock.log`)이 저장된 `%APPDATA%\KakaoTalkAdBlockerLayout\` 폴더를 파일 탐색기로 바로 열어줍니다.
 6. **업데이트 확인**
@@ -182,7 +187,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --minimized
 # [진단] 섀도우 모드 (창을 실제로 숨기지 않고 탐지 판정만 시뮬레이션)
 KakaoTalkLayoutAdBlocker_v11.exe --shadow
 
-# [진단] 환경 자가 진단 (레지스트리, 프로세스, 설정 파일 상태 점검)
+# [진단] 환경 자가 진단 (APPDATA 쓰기, HKCU Run 레지스트리 읽기/쓰기, 시작프로그램 등록 명령, 프로세스 열거, 설정 파일 무결성)
 KakaoTalkLayoutAdBlocker_v11.exe --self-check
 
 # [진단] 자가 진단 결과를 JSON 형식으로 stdout 출력
@@ -204,7 +209,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 | :--- | :--- |
 | `--minimized` | 화면 알림 없이 시스템 트레이로 바로 백그라운드 시작합니다. |
 | `--shadow` | **시뮬레이션 모드**. 창을 숨기거나 닫지 않고 탐지된 메인 창 및 광고 후보 목록만 표준 출력합니다. |
-| `--self-check` | 엔진을 실행하지 않고 시스템 권한, 프로세스 탐색, 설정 파일 무결성을 진단합니다. |
+| `--self-check` | 엔진을 실행하지 않고 APPDATA 쓰기 권한, `HKCU Run` 레지스트리 읽기/쓰기 접근, 시작프로그램 등록 명령 상태, 프로세스 열거, 설정 파일 무결성을 진단합니다. 설정 자동 복구 같은 정보성 경고는 `info_warnings`, 실제 실패는 `core_warnings`로 분리 보고합니다. |
 | `--json` | 진단 결과를 정형화된 JSON 포맷으로 출력합니다. |
 | `--dump-tree` | 현재 카카오톡의 윈도우 계층 구조를 JSON으로 저장합니다. 자식 트리는 `windows`, owned popup 광고 호스트는 `owned_popups`에 따로 있습니다. |
 | `--dump-tree-series` | 지정된 시간 동안 연속으로 윈도우 프레임과 광고 후보 판정 결과를 기록합니다. 프레임 사이 weak-signal 상태를 유지합니다. |
@@ -225,7 +230,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 - 📁 **저장 경로**: `%APPDATA%\KakaoTalkAdBlockerLayout\`
   - `layout_settings_v11.json` : 동작 주기 및 기능 설정
   - `layout_rules_v11.json` : 광고 윈도우 식별 클래스 및 레이아웃 규칙
-  - `layout_adblock.log` : 프로그램 동작 로그 파일
+  - `layout_adblock.log` : 프로그램 동작 로그 파일 (5MB를 넘으면 실행 중에도 `layout_adblock.log.1`로 자동 회전)
 
 트레이 메뉴의 **[로그 폴더 열기]**를 클릭하면 해당 폴더가 즉시 열립니다.
 
@@ -247,10 +252,14 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 }
 ```
 
-- `poll_interval_ms`: 카카오톡 활성 상태에서의 탐지 주기 (기본값: `50ms`)
-- `idle_poll_interval_ms`: 카카오톡 유휴 상태에서의 탐지 주기 (기본값: `200ms`)
+- `poll_interval_ms`: 카카오톡 **활성** 상태(최근 2초 이내에 카카오톡 창 이벤트가 발생한 상태)에서의 재확인 주기 (기본값: `50ms`, 최소 `50ms`)
+- `idle_poll_interval_ms`: 카카오톡 **유휴** 상태에서의 재확인 주기 (기본값: `200ms`, 최소 `200ms`). `poll_interval_ms`가 이 값보다 크면 이 값으로 제한됩니다.
+- `pid_scan_interval_ms`: 카카오톡 프로세스 목록 재조회 주기 (기본값: `200ms`, 최소 `200ms`). PID가 모두 살아 있으면 5초 주기 전체 동기화만 수행합니다.
+- `cache_cleanup_interval_ms`: 사라진 창의 판정 상태/재시도 캐시를 정리하는 주기 (기본값: `1000ms`, 최소 `100ms`)
 - `aggressive_mode`: 광고 키워드 토큰 기반 심화 탐지 모드 여부
 - `burst_scan_iterations` / `burst_scan_interval_ms`: 창 포커스 변화 시 순간 버스트 스캔 설정
+- `start_minimized`: **현재 미사용**입니다. Rust 런타임은 창 없이 트레이로만 동작하므로 숨길 메인 창이 없습니다. 기존 설정 파일 호환을 위해 필드만 유지합니다.
+- `log_level`: `TRACE`/`DEBUG`/`INFO`/`WARN`/`ERROR`. 팝업이 `WM_CLOSE`를 거부해 hide/zero-size 대체 경로로 넘어간 사실은 `DEBUG`에서 확인할 수 있습니다.
 
 ### layout_rules_v11.json (광고 필터링 규칙)
 카카오톡의 내부 윈도우 클래스명이 변경되더라도 바이너리 재빌드 없이 JSON 규칙 수정만으로 유연하게 대응할 수 있습니다.

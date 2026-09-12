@@ -1,13 +1,15 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kakao_core::{LayoutRules, LayoutSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const VERSION: &str = "11.1.3";
+pub const VERSION: &str = "11.1.4";
 pub const APPDATA_DIRNAME: &str = "KakaoTalkAdBlockerLayout";
 pub const SETTINGS_FILE: &str = "layout_settings_v11.json";
 pub const RULES_FILE: &str = "layout_rules_v11.json";
@@ -238,17 +240,38 @@ pub fn atomic_write(path: &Path, text: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("tmp");
-    {
+    // Per-process temp name: `--self-check` runs outside the single-instance
+    // mutex, so it can write these files while the tray app is saving settings.
+    // A shared `foo.tmp` would let the two truncate each other mid-write.
+    let tmp = path.with_file_name(format!(
+        "{}.{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, AtomicOrdering::Relaxed)
+    ));
+    let write_result = (|| -> io::Result<()> {
         let mut file = fs::File::create(&tmp)?;
         file.write_all(text.as_bytes())?;
         file.flush()?;
+        Ok(())
+    })();
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
     }
-    fs::rename(&tmp, path)
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = fs::remove_file(&tmp);
+            Err(err)
+        }
+    }
 }
 
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 const BROKEN_BACKUP_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
-const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+pub const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
 pub fn ensure_runtime_files(paths: &RuntimePaths) -> Vec<String> {
     let mut warnings = Vec::new();
@@ -272,6 +295,10 @@ pub fn ensure_runtime_files(paths: &RuntimePaths) -> Vec<String> {
     warnings
 }
 
+pub fn rotated_log_path(path: &Path) -> PathBuf {
+    path.with_extension("log.1")
+}
+
 pub fn rotate_log_if_needed(path: &Path) {
     let Ok(meta) = fs::metadata(path) else {
         return;
@@ -279,9 +306,124 @@ pub fn rotate_log_if_needed(path: &Path) {
     if meta.len() <= LOG_ROTATE_BYTES {
         return;
     }
-    let rotated = path.with_extension("log.1");
+    rotate_log_now(path);
+}
+
+fn rotate_log_now(path: &Path) {
+    let rotated = rotated_log_path(path);
     let _ = fs::remove_file(&rotated);
     let _ = fs::rename(path, rotated);
+}
+
+/// Append-only log file that rotates itself while the process runs.
+///
+/// The previous setup checked the size once at startup and then handed a plain
+/// `File` to `tracing`. A tray app registered as a startup program can stay up
+/// for weeks, so that check never ran again and the log grew without bound.
+/// Rotating through this writer also avoids renaming a file that still has a
+/// live append handle, which would keep writing into the rotated copy.
+pub struct RotatingLog {
+    path: PathBuf,
+    max_bytes: u64,
+    state: Mutex<Option<LogState>>,
+}
+
+struct LogState {
+    file: fs::File,
+    len: u64,
+}
+
+impl RotatingLog {
+    pub fn open(path: &Path, max_bytes: u64) -> io::Result<Self> {
+        rotate_log_if_needed(path);
+        let state = open_append(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            max_bytes: max_bytes.max(64 * 1024),
+            state: Mutex::new(Some(state)),
+        })
+    }
+
+    fn write_record(&self, buf: &[u8]) -> io::Result<usize> {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let needs_rotate = guard
+            .as_ref()
+            .is_some_and(|state| state.len.saturating_add(buf.len() as u64) > self.max_bytes);
+        if needs_rotate {
+            // Drop the handle before renaming so the reopened file is the new one.
+            *guard = None;
+            rotate_log_now(&self.path);
+        }
+        if guard.is_none() {
+            match open_append(&self.path) {
+                Ok(state) => *guard = Some(state),
+                // Losing the file must not take down logging as a whole; the
+                // console layer keeps working and the next record retries.
+                Err(_) => return Ok(buf.len()),
+            }
+        }
+        let Some(state) = guard.as_mut() else {
+            return Ok(buf.len());
+        };
+        match state.file.write(buf) {
+            Ok(written) => {
+                state.len = state.len.saturating_add(written as u64);
+                Ok(written)
+            }
+            Err(err) => {
+                *guard = None;
+                Err(err)
+            }
+        }
+    }
+
+    fn flush_inner(&self) -> io::Result<()> {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match guard.as_mut() {
+            Some(state) => state.file.flush(),
+            None => Ok(()),
+        }
+    }
+}
+
+fn open_append(path: &Path) -> io::Result<LogState> {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let len = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    Ok(LogState { file, len })
+}
+
+pub struct RotatingLogWriter<'a> {
+    owner: &'a RotatingLog,
+}
+
+impl Write for RotatingLogWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.owner.write_record(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.owner.flush_inner()
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RotatingLog {
+    type Writer = RotatingLogWriter<'a>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        RotatingLogWriter { owner: self }
+    }
 }
 
 fn cleanup_broken_backups(path: &Path) {

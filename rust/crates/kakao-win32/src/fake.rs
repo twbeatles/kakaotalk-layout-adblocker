@@ -46,6 +46,7 @@ struct Inner {
     flatten_enum_children: bool,
     fail_set_pos: HashSet<i64>,
     fail_show: HashSet<i64>,
+    restore_attempts: HashMap<i64, u64>,
 }
 
 pub struct FakeWin32 {
@@ -63,6 +64,7 @@ impl FakeWin32 {
             flatten_enum_children: false,
             fail_set_pos: HashSet::new(),
             fail_show: HashSet::new(),
+            restore_attempts: HashMap::new(),
         };
         for node in dump.windows {
             load_node(&mut inner, node, 0);
@@ -112,6 +114,16 @@ impl FakeWin32 {
                 inner.fail_set_pos.remove(&hwnd);
             }
         });
+    }
+
+    /// How many times a restore was attempted on this window (SW_SHOW or a
+    /// non-zero SetWindowPos). Lets tests assert the retry backoff.
+    pub fn restore_attempts(&self, hwnd: i64) -> u64 {
+        self.with(|inner| inner.restore_attempts.get(&hwnd).copied().unwrap_or(0))
+    }
+
+    pub fn reset_restore_attempts(&self) {
+        self.with(|inner| inner.restore_attempts.clear());
     }
 
     pub fn set_fail_show_window(&self, hwnd: i64, fail: bool) {
@@ -269,6 +281,9 @@ impl Win32Api for FakeWin32 {
 
     fn show_window(&self, hwnd: i64, cmd: i32) -> bool {
         self.with(|inner| {
+            if cmd == SW_SHOW {
+                *inner.restore_attempts.entry(hwnd).or_insert(0) += 1;
+            }
             if inner.fail_show.contains(&hwnd) {
                 return false;
             }

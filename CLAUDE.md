@@ -3,7 +3,7 @@
 ## 개요
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
-- 버전: `11.1.3`
+- 버전: `11.1.4`
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
@@ -28,6 +28,22 @@
 - 실측 기준(2026-06-17, KakaoTalk `26.5.0.5163`): 메인 배너 광고는 **owner=메인창인 owned `WS_POPUP`**(`EVA_Window_Dblclk`, 빈 텍스트) 안에 `Chrome_WidgetWin_1`/`Chrome Legacy Window`(CEF)를 갖는다. 엔진은 `GetParent`가 owned 윈도우에 owner(=메인 핸들)를 반환하는 특성 덕에 "메인의 빈 텍스트 자식 후보" 분기로 등록 후 legacy signature로 hide한다(`parent==0` 분기 아님). 잘 동작하지만 Win32 동작에 기댄 부하지지 경로이므로 추측 변경 금지, `tests/fixtures/window_dumps/owned_popup_legacy_ad.json` 골든 회귀로 고정한다.
 - `--dump-tree`의 `windows` 트리는 owned popup을 넣지 않고 `owned_popups` 배열에 따로 둔다. `windows`만 보면 광고 호스트가 빠져 보이므로, 구조 판단은 `owned_popups`·series `candidates[]` 또는 실제 엔진 실행으로 한다. 그래프 자식 에지는 Win32 직계 자식(`GetParent`) 기준이다.
 
+## Rust 활성 런타임 동작 (아래 "핵심 모듈"의 Python 계약과 다른 지점)
+
+> 아래 "핵심 모듈" 절은 명시된 대로 **Python 참고 구현(`legacy/python-v11`)의 알고리즘 계약**이다.
+> Rust 기본 구현이 의도적으로 다르게 동작하는 지점은 다음과 같다. 혼동하지 말 것.
+
+- 설정/규칙 파손 백업 파일명은 Rust에서 `*.broken-<unix-epoch>`다. Python 계약의 `*.broken-YYYYMMDD-HHMMSS`가 아니다.
+- 트레이 상태는 v11.1.4부터 메뉴 헤더 + `NIF_TIP` 툴팁으로 노출한다(`kakao-win32/src/tray.rs`의 `status_menu_lines` / `status_tooltip`). 상태 값은 `SharedFlags`의 `main_windows`(확정 게이지), `hidden_windows`/`closed_windows`/`resized_windows`(누적), `restore_failures`(현재 실패 창 수 게이지), `last_error`에서 읽는다.
+- `EngineStatePayload.closed_windows`는 **empty `EVA_ChildWindow` close 요청 수**다. popup dismiss는 `popup_close_requests`가 따로 센다. 실제 창 소멸 확인은 순수 평가 계층이 알 수 없으므로 `SharedFlags.closed_windows`(엔진 계층)가 담당한다.
+- popup dismiss는 `WM_CLOSE` 결과로 분기하지 않고 hide/zero-size fallback을 항상 적용한다. 다만 소멸/거부/미전달 여부를 `DEBUG` 로그로 남긴다(`engine.rs` `apply_evaluation`). 매 tick 반복되는 경로라 `WARN`이 아니다.
+- 복원 실패는 지수 백오프로 재시도하고(`RESTORE_MAX_ATTEMPTS`, `RESTORE_GIVEUP_COOLDOWN_TICKS`) 창당 1회만 경고한다. `restore_failures`는 누적 시도 횟수가 아니라 현재 실패 중인 창 수다.
+- 로그 회전은 시작 시 1회가 아니라 `config::RotatingLog`가 기록 중에도 수행한다.
+- WinEvent 훅은 카카오톡 PID로 범위를 한정하며 PID 집합이 바뀌면 재설치한다(`EventHook::install_for_pids`).
+- 워커 tick은 `evaluate_graph_for_apply`(진단 `candidates` 미생성)를 쓰고, `--dump-tree`/`--dump-tree-series`/`--shadow`만 `evaluate_graph_with_states`를 쓴다. 두 경로의 `actions`/`state`는 동일해야 하며 `kakao-core/tests/apply_path_parity.rs`가 이를 고정한다.
+- `poll_interval_ms`는 활성(최근 2초 내 카카오톡 이벤트) 재확인 주기, `idle_poll_interval_ms`는 유휴 재확인 주기, `cache_cleanup_interval_ms`는 `states`/`stale` 캐시 정리 주기로 실제 사용된다. `start_minimized`는 트레이 전용 런타임에서 미사용이며 호환용으로만 파싱한다.
+- `--self-check`는 APPDATA 쓰기, `HKCU Run` 읽기/쓰기 접근, Run 등록 명령 health, 프로세스 열거를 점검한다. 경고는 `core_warnings`(strict에서 실패)와 `info_warnings`(설정 자동 복구 등, strict에서도 통과)로 분리한다.
+
 ## 엔트리포인트
 
 - 실행(기본): `dist/KakaoTalkLayoutAdBlocker_v11.exe` 또는 `cargo run -p kakao-app --release`
@@ -36,7 +52,7 @@
 - 루트 `kakaotalk_layout_adblock_v11.py`는 Rust EXE 안내만 출력하고 종료 코드 `0`
 - Python 참고 구현: `legacy/python-v11/kakao_adblocker`, 엔트리 `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
 - 정적 분석: `pyrightconfig.json` extraPaths=`legacy/python-v11`, include=`legacy/python-v11/kakao_adblocker`, `tests`
-- 권장 검증: `.\scripts\dev_check.ps1` (Python 골든) + `cd rust; cargo test --workspace`
+- 권장 검증: `.\scripts\dev_check.ps1` (Python 골든) + `cd rust; cargo test --workspace` (fmt/clippy 포함)
 - 일반 UI: named mutex `Local\KakaoTalkLayoutAdBlocker_v11`. 중복 실행은 stderr 후 종료 코드 `0`
 - `--self-check`, `--dump-tree`, `--dump-tree-series`, `--shadow`는 mutex 밖 진단 경로
 - 트레이: 차단 On/Off, 공격 모드, 시작프로그램, 복원 실패 초기화, 로그/릴리스/업데이트, 종료(restore 후)
@@ -44,6 +60,7 @@
 ## 핵심 모듈
 
 - 활성 런타임: `rust/crates/kakao-core`, `kakao-win32`, `kakao-app`, `kakao-updater`
+- 엔진 캐시(`snapshots`/`states`/`stale`)와 정리 시계는 `kakao-app/src/engine.rs`의 `EngineCaches`에 모여 있고 `tick(api, pids, settings, rules, caches, flags)`가 이를 받는다
 - Python 참고 구현은 `legacy/python-v11/kakao_adblocker/` 아래에 있다. 아래 모듈 설명은 그 참고 구현의 알고리즘 계약이다.
 
 - `kakao_adblocker/app/`

@@ -14,11 +14,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use tracing::{error, info};
 
-use config::{
-    ensure_runtime_files, load_rules, load_settings, rotate_log_if_needed, runtime_paths, VERSION,
-};
+use config::{ensure_runtime_files, load_rules, load_settings, runtime_paths, VERSION};
 use dump::{dump_payload, dump_payload_with_states, write_json};
-use engine::{spawn_worker, tick, SharedFlags};
+use engine::{spawn_worker, tick, EngineCaches, SharedFlags};
 
 #[derive(Parser, Debug)]
 #[command(name = "kakao-adblock-rs", version = VERSION)]
@@ -86,7 +84,6 @@ pub fn run_with_args(args: Args) -> i32 {
     let _ = std::fs::create_dir_all(&paths.appdata_dir);
 
     if args.self_check {
-        rotate_log_if_needed(&paths.log_file);
         init_tracing(Some(&paths.log_file), "INFO");
         return self_check::run(
             args.json,
@@ -114,7 +111,6 @@ pub fn run_with_args(args: Args) -> i32 {
     let bootstrap_warnings = ensure_runtime_files(&paths);
     let (mut settings, warnings) = load_settings(&paths.settings_file);
     let (rules, rule_warnings) = load_rules(&paths.rules_file);
-    rotate_log_if_needed(&paths.log_file);
     init_tracing(Some(&paths.log_file), &settings.log_level);
     for warning in bootstrap_warnings
         .into_iter()
@@ -205,7 +201,11 @@ pub fn run_with_args(args: Args) -> i32 {
                 eprintln!("already running");
                 #[cfg(windows)]
                 {
-                    if !should_attach_parent_console(std::env::args()) {
+                    // `std::env::args()` starts with argv[0]; including it made
+                    // this always look like a diagnostic CLI invocation, so the
+                    // message box never appeared and a second double-click
+                    // exited silently on the GUI-subsystem build.
+                    if !should_attach_parent_console(std::env::args().skip(1)) {
                         show_info_box(
                             "KakaoTalk Layout AdBlocker",
                             "프로그램이 이미 실행 중입니다.",
@@ -225,19 +225,8 @@ pub fn run_with_args(args: Args) -> i32 {
             .apply
             .store(false, std::sync::atomic::Ordering::SeqCst);
         info!("shadow mode: no Hide/Resize/Close");
-        let mut snapshots = Default::default();
-        let mut states = Default::default();
-        let mut stale_miss = Default::default();
-        let evaluation = tick(
-            api.as_ref(),
-            &pids,
-            &settings,
-            &rules,
-            &mut snapshots,
-            &mut states,
-            &mut stale_miss,
-            &flags,
-        );
+        let mut caches = EngineCaches::new();
+        let evaluation = tick(api.as_ref(), &pids, &settings, &rules, &mut caches, &flags);
         println!(
             "shadow main={} candidates={} hide={:?}",
             evaluation.state.main_window_count,
@@ -302,7 +291,7 @@ pub fn run_with_args(args: Args) -> i32 {
     {
         use std::sync::atomic::Ordering;
 
-        use kakao_win32::tray::{TrayCommand, TrayFlags};
+        use kakao_win32::tray::{TrayCommand, TrayFlags, TrayStatus};
 
         use crate::config::{save_settings, VERSION};
 
@@ -316,6 +305,14 @@ pub fn run_with_args(args: Args) -> i32 {
                 enabled: flags.enabled.clone(),
                 aggressive: flags.aggressive.clone(),
                 startup: flags.startup.clone(),
+            },
+            TrayStatus {
+                main_windows: flags.main_windows.clone(),
+                hidden_windows: flags.hidden_windows.clone(),
+                closed_windows: flags.closed_windows.clone(),
+                resized_windows: flags.resized_windows.clone(),
+                restore_failures: flags.restore_failures.clone(),
+                last_error: flags.last_error.clone(),
             },
             move |command| match command {
                 TrayCommand::ToggleEnabled => {
@@ -591,13 +588,11 @@ fn init_tracing(log_path: Option<&std::path::Path>, log_level: &str) {
     let fmt_layer = tracing_subscriber::fmt::layer();
 
     if let Some(path) = log_path {
-        if let Ok(file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
+        // RotatingLog keeps checking the size while the process runs; a plain
+        // append handle only ever got the one startup check.
+        if let Ok(rotating) = config::RotatingLog::open(path, config::LOG_ROTATE_BYTES) {
             let file_layer = tracing_subscriber::fmt::layer()
-                .with_writer(file)
+                .with_writer(rotating)
                 .with_ansi(false);
             let _ = tracing_subscriber::registry()
                 .with(env_filter)

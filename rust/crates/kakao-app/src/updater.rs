@@ -307,6 +307,24 @@ pub struct StagedUpdate {
     pub helper: PathBuf,
     pub current_exe: PathBuf,
     pub replacement: PathBuf,
+    /// Verified at download time and re-checked by the helper right before the
+    /// swap, since the staged file waits in %TEMP% until this process exits.
+    pub sha256: String,
+    /// Flags to restore on the relaunched instance.
+    pub relaunch_args: Vec<String>,
+}
+
+/// Launch flags worth carrying across an update. Diagnostic/smoke-test flags
+/// (`--startup-trace`, `--exit-after-startup-ms`) are deliberately dropped.
+pub fn relaunch_args_from<I, S>(args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .filter(|arg| matches!(arg.as_ref(), "--startup-launch" | "--minimized"))
+        .map(|arg| arg.as_ref().to_string())
+        .collect()
 }
 
 pub fn download_and_verify(
@@ -402,6 +420,8 @@ pub fn prepare_update(manifest: &UpdateManifest) -> Result<StagedUpdate, UpdateE
         helper,
         current_exe,
         replacement,
+        sha256: manifest.sha256.clone(),
+        relaunch_args: relaunch_args_from(std::env::args().skip(1)),
     })
 }
 
@@ -414,6 +434,12 @@ pub fn launch_helper(staged: &StagedUpdate) -> Result<(), UpdateError> {
         .arg(&staged.current_exe)
         .arg("--replacement")
         .arg(&staged.replacement);
+    if !staged.sha256.is_empty() {
+        cmd.arg("--sha256").arg(&staged.sha256);
+    }
+    for arg in &staged.relaunch_args {
+        cmd.arg("--relaunch-arg").arg(arg);
+    }
 
     #[cfg(windows)]
     {
@@ -504,6 +530,17 @@ mod tests {
             "https://malicious.example.com/KakaoTalkLayoutAdBlocker_v11.exe",
             "v11.1.0"
         ));
+    }
+
+    #[test]
+    fn relaunch_args_keep_launch_flags_and_drop_smoke_flags() {
+        assert_eq!(
+            relaunch_args_from(["--startup-launch", "--minimized"]),
+            vec!["--startup-launch".to_string(), "--minimized".to_string()]
+        );
+        assert!(relaunch_args_from(["--startup-trace", "C:\t.json"]).is_empty());
+        assert!(relaunch_args_from(["--exit-after-startup-ms", "500"]).is_empty());
+        assert!(relaunch_args_from(Vec::<&str>::new()).is_empty());
     }
 
     #[test]

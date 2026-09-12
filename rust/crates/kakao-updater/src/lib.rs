@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+
+use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
 
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +23,26 @@ pub enum HelperError {
     RelaunchFailed(String),
     #[error("롤백 실패: {0}")]
     RollbackFailed(String),
+    #[error("새 업데이트 파일 해시가 일치하지 않습니다: {0}")]
+    ReplacementHashMismatch(String),
+}
+
+/// Options for the swap. `expected_sha256` re-verifies the staged artifact just
+/// before it replaces the running EXE: the app hashed it at download time, but
+/// the helper is a separate process that starts later, so nothing had checked
+/// the bytes actually being installed.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateOptions {
+    pub relaunch: bool,
+    pub relaunch_args: Vec<String>,
+    pub expected_sha256: Option<String>,
+}
+
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hex::encode(hasher.finalize()))
 }
 
 pub fn wait_for_process_exit(pid: u32, timeout: Duration) -> Result<(), HelperError> {
@@ -77,6 +99,26 @@ pub fn update_executable(
     timeout: Duration,
     relaunch: bool,
 ) -> Result<(), HelperError> {
+    update_executable_with(
+        current,
+        replacement,
+        pid,
+        timeout,
+        &UpdateOptions {
+            relaunch,
+            ..UpdateOptions::default()
+        },
+    )
+}
+
+pub fn update_executable_with(
+    current: &Path,
+    replacement: &Path,
+    pid: u32,
+    timeout: Duration,
+    options: &UpdateOptions,
+) -> Result<(), HelperError> {
+    let relaunch = options.relaunch;
     info!(
         current = %current.display(),
         replacement = %replacement.display(),
@@ -98,6 +140,18 @@ pub fn update_executable(
         .map_err(|_e| HelperError::ReplacementMissing(replacement.to_path_buf()))?;
     if meta.len() == 0 {
         return Err(HelperError::ReplacementEmpty(replacement.to_path_buf()));
+    }
+    if let Some(expected) = options.expected_sha256.as_deref() {
+        let actual = sha256_file(replacement)
+            .map_err(|err| HelperError::ReplacementHashMismatch(err.to_string()))?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            error!(%actual, %expected, "staged update failed re-verification");
+            let _ = std::fs::remove_file(replacement);
+            return Err(HelperError::ReplacementHashMismatch(format!(
+                "expected {expected}, got {actual}"
+            )));
+        }
+        info!("staged update re-verified before replacement");
     }
 
     // 3. Prepare backup path
@@ -143,12 +197,25 @@ pub fn update_executable(
 
     // 6. Relaunch new version if requested
     if relaunch {
-        info!("relaunching updated application");
-        if let Err(err) = Command::new(current).spawn() {
+        info!(args = ?options.relaunch_args, "relaunching updated application");
+        // Carry the original launch flags across the update so a tray/startup
+        // launch keeps behaving like one.
+        let mut cmd = Command::new(current);
+        cmd.args(&options.relaunch_args);
+        if let Err(err) = cmd.spawn() {
             error!(%err, "failed to relaunch updated executable, attempting rollback");
-            // Rollback
-            let _ = std::fs::rename(current, replacement);
-            let _ = std::fs::rename(&backup, current);
+            if let Err(move_back) = std::fs::rename(current, replacement) {
+                warn!(%move_back, "could not move the new executable back to staging");
+            }
+            match std::fs::rename(&backup, current) {
+                Ok(()) => info!("rolled back to the previous executable"),
+                Err(rb_err) => {
+                    error!(%rb_err, "catastrophic: rollback after failed relaunch failed");
+                    return Err(HelperError::RollbackFailed(format!(
+                        "{err}; rollback error: {rb_err}"
+                    )));
+                }
+            }
             return Err(HelperError::RelaunchFailed(err.to_string()));
         }
     }

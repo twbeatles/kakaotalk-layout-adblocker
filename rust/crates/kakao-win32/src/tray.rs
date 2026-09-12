@@ -1,15 +1,17 @@
 #![cfg(windows)]
 
+use std::cell::{Cell, RefCell};
 use std::mem::size_of;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+    NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
@@ -29,6 +31,8 @@ fn app_icon_resource() -> PCWSTR {
 
 const WM_TRAY: u32 = WM_APP + 1;
 const TRAY_RETRY_TIMER_ID: usize = 1;
+const TRAY_STATUS_TIMER_ID: usize = 2;
+const TRAY_STATUS_INTERVAL_MS: u32 = 1000;
 const SHELL_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 const SHELL_WAIT_POLL: Duration = Duration::from_millis(500);
 static TRAY_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
@@ -75,15 +79,130 @@ pub struct TrayFlags {
     pub startup: Arc<AtomicBool>,
 }
 
-struct TrayHost<F>
-where
-    F: FnMut(TrayCommand),
-{
+/// Live engine counters shown in the tray tooltip and menu header. Without
+/// these the "복원 실패 초기화" menu item resets a number nobody can see.
+#[derive(Clone, Default)]
+pub struct TrayStatus {
+    pub main_windows: Arc<AtomicU32>,
+    pub hidden_windows: Arc<AtomicU32>,
+    pub closed_windows: Arc<AtomicU32>,
+    pub resized_windows: Arc<AtomicU32>,
+    pub restore_failures: Arc<AtomicU32>,
+    pub last_error: Arc<Mutex<String>>,
+}
+
+/// Plain snapshot so the status text can be unit-tested without Win32.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatusSnapshot {
+    pub enabled: bool,
+    pub aggressive: bool,
+    pub main_windows: u32,
+    pub hidden_windows: u32,
+    pub closed_windows: u32,
+    pub resized_windows: u32,
+    pub restore_failures: u32,
+    pub last_error: String,
+}
+
+impl StatusSnapshot {
+    fn capture(flags: &TrayFlags, status: &TrayStatus) -> Self {
+        Self {
+            enabled: flags.enabled.load(Ordering::SeqCst),
+            aggressive: flags.aggressive.load(Ordering::SeqCst),
+            main_windows: status.main_windows.load(Ordering::SeqCst),
+            hidden_windows: status.hidden_windows.load(Ordering::SeqCst),
+            closed_windows: status.closed_windows.load(Ordering::SeqCst),
+            resized_windows: status.resized_windows.load(Ordering::SeqCst),
+            restore_failures: status.restore_failures.load(Ordering::SeqCst),
+            last_error: status
+                .last_error
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// Single-line summary for the notification-area tooltip (NIF_TIP, 127 wchars).
+pub fn status_tooltip(snapshot: &StatusSnapshot) -> String {
+    let mut text = format!(
+        "KakaoTalk Layout AdBlocker\n차단 {} · 공격 {} · 메인윈도우 {}",
+        on_off(snapshot.enabled),
+        on_off(snapshot.aggressive),
+        snapshot.main_windows
+    );
+    if snapshot.restore_failures > 0 {
+        text.push_str(&format!("\n복원 실패 {}건", snapshot.restore_failures));
+    }
+    truncate_utf16(&text, 127)
+}
+
+/// Grayed header lines shown above the tray menu items.
+pub fn status_menu_lines(snapshot: &StatusSnapshot) -> Vec<String> {
+    let mut lines = vec![
+        "KakaoTalk Layout AdBlocker".to_string(),
+        format!(
+            "차단 {} · 공격 모드 {} · 메인윈도우 {}",
+            on_off(snapshot.enabled),
+            on_off(snapshot.aggressive),
+            snapshot.main_windows
+        ),
+        format!(
+            "누적 숨김 {} · 누적 닫힘 {} · 누적 리사이즈 {}",
+            snapshot.hidden_windows, snapshot.closed_windows, snapshot.resized_windows
+        ),
+    ];
+    if snapshot.restore_failures > 0 {
+        lines.push(format!(
+            "복원 실패 {}건 (초기화 가능)",
+            snapshot.restore_failures
+        ));
+    }
+    let error = snapshot.last_error.trim();
+    if !error.is_empty() {
+        lines.push(format!("오류: {}", truncate_utf16(error, 60)));
+    }
+    lines
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "ON"
+    } else {
+        "OFF"
+    }
+}
+
+fn truncate_utf16(text: &str, max_units: usize) -> String {
+    if text.encode_utf16().count() <= max_units {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut units = 0usize;
+    for ch in text.chars() {
+        let len = ch.len_utf16();
+        if units + len > max_units {
+            break;
+        }
+        units += len;
+        out.push(ch);
+    }
+    out
+}
+
+/// Tray window state.
+///
+/// Every field is interior-mutable so `wnd_proc` only ever takes a shared
+/// reference. The previous version handed out `&mut TrayHost` and invoked the
+/// user callback through it; a modal `MessageBoxW` in that callback pumps
+/// messages and can re-enter `wnd_proc`, which would alias the `&mut`.
+struct TrayHost {
     flags: TrayFlags,
-    on_command: F,
-    nid: NOTIFYICONDATAW,
+    status: TrayStatus,
+    nid: RefCell<NOTIFYICONDATAW>,
     taskbar_created: u32,
-    icon_added: bool,
+    icon_added: Cell<bool>,
+    pending: RefCell<Vec<TrayCommand>>,
 }
 
 pub fn wait_for_shell_ready_with(
@@ -153,19 +272,24 @@ fn try_add_notify_icon(nid: &NOTIFYICONDATAW) -> bool {
     unsafe { Shell_NotifyIconW(NIM_ADD, nid).as_bool() }
 }
 
-pub fn run_loop<F>(flags: TrayFlags, on_command: F) -> Result<(), String>
+pub fn run_loop<F>(flags: TrayFlags, status: TrayStatus, on_command: F) -> Result<(), String>
 where
     F: FnMut(TrayCommand),
 {
-    unsafe { run_loop_inner(flags, on_command, None::<fn()>) }
+    unsafe { run_loop_inner(flags, status, on_command, None::<fn()>) }
 }
 
-pub fn run_loop_with_ready<F, R>(flags: TrayFlags, on_command: F, on_ready: R) -> Result<(), String>
+pub fn run_loop_with_ready<F, R>(
+    flags: TrayFlags,
+    status: TrayStatus,
+    on_command: F,
+    on_ready: R,
+) -> Result<(), String>
 where
     F: FnMut(TrayCommand),
     R: FnOnce(),
 {
-    unsafe { run_loop_inner(flags, on_command, Some(on_ready)) }
+    unsafe { run_loop_inner(flags, status, on_command, Some(on_ready)) }
 }
 
 pub fn request_exit() -> bool {
@@ -179,7 +303,8 @@ pub fn request_exit() -> bool {
 
 unsafe fn run_loop_inner<F, R>(
     flags: TrayFlags,
-    on_command: F,
+    status: TrayStatus,
+    mut on_command: F,
     on_ready: Option<R>,
 ) -> Result<(), String>
 where
@@ -195,7 +320,7 @@ where
     let class = w!("KakaoTalkLayoutAdBlockerTray");
     let wc = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(wnd_proc::<F>),
+        lpfnWndProc: Some(wnd_proc),
         hInstance: instance.into(),
         hIcon: icon,
         lpszClassName: class,
@@ -228,7 +353,10 @@ where
         hIcon: icon,
         ..Default::default()
     };
-    write_tip(&mut nid, "KakaoTalk Layout AdBlocker");
+    write_tip(
+        &mut nid,
+        &status_tooltip(&StatusSnapshot::capture(&flags, &status)),
+    );
     let taskbar_created = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
     let mut added = try_add_notify_icon(&nid);
     if !added {
@@ -248,17 +376,24 @@ where
     }
 
     TRAY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
-    let mut host = TrayHost {
+    let host = TrayHost {
         flags,
-        on_command,
-        nid,
+        status,
+        nid: RefCell::new(nid),
         taskbar_created,
-        icon_added: added,
+        icon_added: Cell::new(added),
+        pending: RefCell::new(Vec::new()),
     };
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of_mut!(host) as isize);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of!(host) as isize);
     if !added {
         let _ = SetTimer(Some(hwnd), TRAY_RETRY_TIMER_ID, 2000, None);
     }
+    let _ = SetTimer(
+        Some(hwnd),
+        TRAY_STATUS_TIMER_ID,
+        TRAY_STATUS_INTERVAL_MS,
+        None,
+    );
     if let Some(on_ready) = on_ready {
         on_ready();
     }
@@ -267,37 +402,65 @@ where
     while GetMessageW(&mut msg, None, 0, 0).as_bool() {
         let _ = TranslateMessage(&msg);
         DispatchMessageW(&msg);
+        // Commands are queued by wnd_proc and run here, with no borrow of
+        // TrayHost held. A modal dialog inside on_command may pump messages
+        // and re-enter wnd_proc; that is now safe.
+        let commands: Vec<TrayCommand> = host.pending.borrow_mut().drain(..).collect();
+        for command in commands {
+            on_command(command);
+        }
     }
 
     TRAY_HWND.store(0, Ordering::SeqCst);
-    let _ = Shell_NotifyIconW(NIM_DELETE, &host.nid);
+    let _ = Shell_NotifyIconW(NIM_DELETE, &*host.nid.borrow());
     Ok(())
 }
 
-unsafe extern "system" fn wnd_proc<F: FnMut(TrayCommand)>(
+fn refresh_tooltip(host: &TrayHost) {
+    if !host.icon_added.get() {
+        return;
+    }
+    let snapshot = StatusSnapshot::capture(&host.flags, &host.status);
+    let tip = status_tooltip(&snapshot);
+    let mut nid = host.nid.borrow_mut();
+    if tip_matches(&nid, &tip) {
+        return;
+    }
+    write_tip(&mut nid, &tip);
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &*nid);
+    }
+}
+
+fn tip_matches(nid: &NOTIFYICONDATAW, tip: &str) -> bool {
+    let end = nid.szTip.iter().position(|ch| *ch == 0).unwrap_or(0);
+    String::from_utf16_lossy(&nid.szTip[..end]) == tip
+}
+
+unsafe extern "system" fn wnd_proc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let host = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut TrayHost<F>;
+    let host = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const TrayHost;
     if host.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     }
+    let host = unsafe { &*host };
     match msg {
         WM_TRAY => {
             let event = lparam.0 as u32;
             if event == WM_RBUTTONUP || event == WM_CONTEXTMENU {
-                unsafe { show_menu(hwnd, &mut *host) };
+                unsafe { show_menu(hwnd, host) };
             }
             LRESULT(0)
         }
         WM_COMMAND => {
             let id = (wparam.0 as u32) & 0xFFFF;
             if let Some(cmd) = TrayCommand::from_id(id) {
-                let exit = cmd == TrayCommand::Exit;
-                (unsafe { &mut *host }.on_command)(cmd);
-                if exit {
+                host.pending.borrow_mut().push(cmd);
+                if cmd == TrayCommand::Exit {
                     unsafe {
                         let _ = DestroyWindow(hwnd);
                     }
@@ -309,28 +472,33 @@ unsafe extern "system" fn wnd_proc<F: FnMut(TrayCommand)>(
             unsafe {
                 TRAY_HWND.store(0, Ordering::SeqCst);
                 let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
-                let _ = Shell_NotifyIconW(NIM_DELETE, &(*host).nid);
+                let _ = KillTimer(Some(hwnd), TRAY_STATUS_TIMER_ID);
+                let _ = Shell_NotifyIconW(NIM_DELETE, &*host.nid.borrow());
                 PostQuitMessage(0);
             }
             LRESULT(0)
         }
         WM_TIMER => {
-            unsafe {
-                if wparam.0 == TRAY_RETRY_TIMER_ID && !(*host).icon_added {
-                    let added = Shell_NotifyIconW(NIM_ADD, &(*host).nid).as_bool();
-                    (*host).icon_added = added;
+            match wparam.0 {
+                TRAY_RETRY_TIMER_ID if !host.icon_added.get() => unsafe {
+                    let added = Shell_NotifyIconW(NIM_ADD, &*host.nid.borrow()).as_bool();
+                    host.icon_added.set(added);
                     if added {
                         let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
                     }
-                }
+                },
+                TRAY_STATUS_TIMER_ID => refresh_tooltip(host),
+                _ => {}
             }
             LRESULT(0)
         }
-        msg if msg == unsafe { (*host).taskbar_created } && msg != 0 => {
+        msg if msg == host.taskbar_created && msg != 0 => {
             unsafe {
-                let _ = Shell_NotifyIconW(NIM_DELETE, &(*host).nid);
-                let added = Shell_NotifyIconW(NIM_ADD, &(*host).nid).as_bool();
-                (*host).icon_added = added;
+                let nid = host.nid.borrow();
+                let _ = Shell_NotifyIconW(NIM_DELETE, &*nid);
+                let added = Shell_NotifyIconW(NIM_ADD, &*nid).as_bool();
+                drop(nid);
+                host.icon_added.set(added);
                 if added {
                     let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
                 }
@@ -341,17 +509,19 @@ unsafe extern "system" fn wnd_proc<F: FnMut(TrayCommand)>(
     }
 }
 
-unsafe fn show_menu<F: FnMut(TrayCommand)>(hwnd: HWND, host: &mut TrayHost<F>) {
+unsafe fn show_menu(hwnd: HWND, host: &TrayHost) {
     let Ok(menu) = CreatePopupMenu() else {
         return;
     };
-    append(menu, 0, "KakaoTalk Layout AdBlocker", false, false);
+    let snapshot = StatusSnapshot::capture(&host.flags, &host.status);
+    for line in status_menu_lines(&snapshot) {
+        append(menu, 0, &line, false, false);
+    }
     append_sep(menu);
-    let enabled = host.flags.enabled.load(Ordering::SeqCst);
     append(
         menu,
         ID_TOGGLE_ENABLED,
-        if enabled {
+        if snapshot.enabled {
             "차단 끄기"
         } else {
             "차단 켜기"
@@ -363,7 +533,7 @@ unsafe fn show_menu<F: FnMut(TrayCommand)>(hwnd: HWND, host: &mut TrayHost<F>) {
         menu,
         ID_TOGGLE_AGGRESSIVE,
         "공격 모드",
-        host.flags.aggressive.load(Ordering::SeqCst),
+        snapshot.aggressive,
         true,
     );
     append(
@@ -373,7 +543,13 @@ unsafe fn show_menu<F: FnMut(TrayCommand)>(hwnd: HWND, host: &mut TrayHost<F>) {
         host.flags.startup.load(Ordering::SeqCst),
         true,
     );
-    append(menu, ID_RESET_RESTORE, "복원 실패 초기화", false, true);
+    append(
+        menu,
+        ID_RESET_RESTORE,
+        "복원 실패 초기화",
+        false,
+        snapshot.restore_failures > 0 || !snapshot.last_error.is_empty(),
+    );
     append_sep(menu);
     append(menu, ID_OPEN_LOGS, "로그 폴더 열기", false, true);
     append(menu, ID_OPEN_RELEASES, "GitHub 릴리스 열기", false, true);
@@ -421,12 +597,10 @@ fn load_app_icon(
 }
 
 fn write_tip(nid: &mut NOTIFYICONDATAW, tip: &str) {
-    let mut wide: Vec<u16> = tip.encode_utf16().take(127).collect();
-    wide.push(0);
+    nid.szTip.fill(0);
+    let wide: Vec<u16> = tip.encode_utf16().take(nid.szTip.len() - 1).collect();
     for (i, ch) in wide.iter().enumerate() {
-        if i < nid.szTip.len() {
-            nid.szTip[i] = *ch;
-        }
+        nid.szTip[i] = *ch;
     }
 }
 
@@ -517,5 +691,56 @@ mod tests {
     #[test]
     fn tray_keeps_message_loop_when_notify_icon_add_fails() {
         assert!(continue_message_loop_without_icon());
+    }
+
+    #[test]
+    fn status_lines_report_counters_and_failures() {
+        let snapshot = StatusSnapshot {
+            enabled: true,
+            aggressive: false,
+            main_windows: 2,
+            hidden_windows: 7,
+            closed_windows: 1,
+            resized_windows: 12,
+            restore_failures: 3,
+            last_error: "restore show failed hwnd=42".into(),
+        };
+        let lines = status_menu_lines(&snapshot);
+        assert!(lines.iter().any(|l| l.contains("차단 ON")));
+        assert!(lines.iter().any(|l| l.contains("공격 모드 OFF")));
+        assert!(lines.iter().any(|l| l.contains("메인윈도우 2")));
+        assert!(lines.iter().any(|l| l.contains("누적 숨김 7")));
+        assert!(lines.iter().any(|l| l.contains("누적 닫힘 1")));
+        assert!(lines.iter().any(|l| l.contains("누적 리사이즈 12")));
+        assert!(lines.iter().any(|l| l.contains("복원 실패 3건")));
+        assert!(lines.iter().any(|l| l.contains("hwnd=42")));
+    }
+
+    #[test]
+    fn status_lines_omit_failure_rows_when_clean() {
+        let snapshot = StatusSnapshot {
+            enabled: true,
+            aggressive: true,
+            main_windows: 1,
+            ..StatusSnapshot::default()
+        };
+        let lines = status_menu_lines(&snapshot);
+        assert!(!lines.iter().any(|l| l.contains("복원 실패")));
+        assert!(!lines.iter().any(|l| l.starts_with("오류:")));
+    }
+
+    #[test]
+    fn tooltip_fits_the_win32_limit() {
+        let snapshot = StatusSnapshot {
+            enabled: true,
+            aggressive: true,
+            main_windows: u32::MAX,
+            restore_failures: u32::MAX,
+            last_error: "x".repeat(500),
+            ..StatusSnapshot::default()
+        };
+        let tip = status_tooltip(&snapshot);
+        assert!(tip.encode_utf16().count() <= 127);
+        assert!(tip.starts_with("KakaoTalk Layout AdBlocker"));
     }
 }

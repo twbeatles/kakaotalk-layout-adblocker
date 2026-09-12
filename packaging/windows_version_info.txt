@@ -4,8 +4,8 @@
 # Keep this file in sync with release versioning.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(11, 1, 3, 0),
-    prodvers=(11, 1, 3, 0),
+    filevers=(11, 1, 4, 0),
+    prodvers=(11, 1, 4, 0),
     mask=0x3F,
     flags=0x0,
     OS=0x40004,
@@ -21,7 +21,7 @@ VSVersionInfo(
           [
             StringStruct(u"CompanyName", u"twbeatles"),
             StringStruct(u"FileDescription", u"KakaoTalk Layout AdBlocker"),
-            StringStruct(u"FileVersion", u"11.1.3.0"),
+            StringStruct(u"FileVersion", u"11.1.4.0"),
             StringStruct(u"InternalName", u"KakaoTalkLayoutAdBlocker_v11"),
             StringStruct(
               u"LegalCopyright", u"Copyright (c) 2026 twbeatles"
@@ -30,7 +30,7 @@ VSVersionInfo(
               u"OriginalFilename", u"KakaoTalkLayoutAdBlocker_v11.exe"
             ),
             StringStruct(u"ProductName", u"KakaoTalk Layout AdBlocker"),
-            StringStruct(u"ProductVersion", u"11.1.3.0"),
+            StringStruct(u"ProductVersion", u"11.1.4.0"),
           ],
         )
       ]

@@ -26,15 +26,56 @@ pub fn startup_approved_enable_blob() -> [u8; 12] {
     blob
 }
 
+/// Whether the HKCU Run key can be opened for reading.
+pub fn probe_run_key_readable() -> bool {
+    let mut key = HKEY::default();
+    let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_READ, &mut key) };
+    if status != ERROR_SUCCESS {
+        return false;
+    }
+    let _ = unsafe { RegCloseKey(key) };
+    true
+}
+
+/// Whether the HKCU Run key can be opened for writing. Opening with
+/// KEY_SET_VALUE checks the ACL without touching any value.
+pub fn probe_run_key_writable() -> bool {
+    let mut key = HKEY::default();
+    let status =
+        unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_SET_VALUE, &mut key) };
+    if status != ERROR_SUCCESS {
+        return false;
+    }
+    let _ = unsafe { RegCloseKey(key) };
+    true
+}
+
 pub fn get_run_command() -> Option<String> {
     let mut key = HKEY::default();
     let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_READ, &mut key) };
     if status != ERROR_SUCCESS {
         return None;
     }
-    let mut data = vec![0u16; 1024];
-    let mut size = (data.len() * 2) as u32;
+    // Ask for the size first: a fixed buffer reported ERROR_MORE_DATA as
+    // "missing", which made the startup repair path overwrite a longer command.
+    let mut size = 0u32;
     let mut kind = REG_VALUE_TYPE::default();
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            VALUE_NAME,
+            None,
+            Some(&mut kind),
+            None,
+            Some(&mut size),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        let _ = unsafe { RegCloseKey(key) };
+        return None;
+    }
+    let mut data = vec![0u16; (size as usize).div_ceil(2).max(1)];
+    let mut size = (data.len() * 2) as u32;
     let status = unsafe {
         RegQueryValueExW(
             key,

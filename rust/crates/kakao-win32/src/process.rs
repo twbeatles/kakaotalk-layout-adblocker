@@ -32,15 +32,22 @@ pub fn kakaotalk_pids() -> HashSet<i64> {
 }
 
 pub fn process_ids(image_name: &str) -> HashSet<i64> {
+    try_process_ids(image_name).unwrap_or_default()
+}
+
+/// Like `process_ids`, but distinguishes "no matching process" (`Some(empty)`)
+/// from "could not enumerate processes" (`None`). `--self-check` needs that
+/// difference: KakaoTalk simply not running is not a diagnostic failure.
+pub fn try_process_ids(image_name: &str) -> Option<HashSet<i64>> {
     let mut pids = HashSet::new();
     let normalized = image_name.trim().to_ascii_lowercase();
     if normalized.is_empty() {
-        return pids;
+        return Some(pids);
     }
     let target_utf16: Vec<u16> = normalized.encode_utf16().collect();
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     let Ok(snapshot) = snapshot else {
-        return pids;
+        return None;
     };
     let mut entry = PROCESSENTRY32W {
         dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
@@ -54,7 +61,7 @@ pub fn process_ids(image_name: &str) -> HashSet<i64> {
         ok = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
     }
     let _ = unsafe { CloseHandle(snapshot) };
-    pids
+    Some(pids)
 }
 
 fn eq_wide_ascii_case(buf: &[u16], target: &[u16]) -> bool {

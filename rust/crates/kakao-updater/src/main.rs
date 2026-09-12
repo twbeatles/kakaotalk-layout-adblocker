@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use kakao_updater::update_executable;
+use kakao_updater::{update_executable_with, UpdateOptions};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info};
@@ -26,6 +26,16 @@ struct Cli {
 
     #[arg(long, default_value_t = false)]
     no_relaunch: bool,
+
+    /// Argument to pass to the relaunched app. Repeat for multiple arguments.
+    #[arg(long = "relaunch-arg")]
+    relaunch_arg: Vec<String>,
+
+    /// Expected SHA-256 of the replacement, re-verified immediately before the
+    /// swap. The app already verified the download; this covers the gap while
+    /// the staged file sits in %TEMP% waiting for the helper to start.
+    #[arg(long)]
+    sha256: Option<String>,
 }
 
 fn show_error_dialog(message: &str) {
@@ -56,12 +66,16 @@ fn main() {
     let args = Cli::parse();
     let relaunch = !args.no_relaunch;
 
-    match update_executable(
+    match update_executable_with(
         &args.current,
         &args.replacement,
         args.pid,
         Duration::from_secs(args.timeout_secs),
-        relaunch,
+        &UpdateOptions {
+            relaunch,
+            relaunch_args: args.relaunch_arg.clone(),
+            expected_sha256: args.sha256.clone(),
+        },
     ) {
         Ok(()) => {
             info!("update helper finished successfully");

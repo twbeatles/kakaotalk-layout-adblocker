@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use kakao_app::config::AppSettings;
-use kakao_app::engine::{restore_all, tick, SharedFlags};
+use kakao_app::engine::{tick, EngineCaches, SharedFlags};
 use kakao_app::graph_build::build_graph;
 use kakao_core::{evaluate_graph, GoldenFile, LayoutRules};
 use kakao_win32::{FakeWin32, Win32Api};
@@ -57,23 +56,12 @@ fn owned_popup_hide_and_restore_on_fake_api() {
     };
     let flags = SharedFlags::from_settings(&settings, true);
     let rules = LayoutRules::default();
-    let mut snapshots = HashMap::new();
-    let mut states = HashMap::new();
-    let mut stale_miss = HashMap::new();
-    let evaluation = tick(
-        &api,
-        &pids,
-        &settings,
-        &rules,
-        &mut snapshots,
-        &mut states,
-        &mut stale_miss,
-        &flags,
-    );
+    let mut caches = EngineCaches::new();
+    let evaluation = tick(&api, &pids, &settings, &rules, &mut caches, &flags);
     assert!(evaluation.actions.hide.contains(&527936));
     assert!(!api.is_window_visible(527936));
     flags.enabled.store(false, Ordering::SeqCst);
-    let (failures, err) = restore_all(&api, &mut snapshots);
+    let (failures, err) = caches.drain_restore_all(&api);
     assert_eq!((failures, err.as_str()), (0, ""), "restore should succeed");
     assert!(api.is_window_visible(527936));
 }
@@ -112,19 +100,8 @@ fn view_resize_keeps_child_top_left_like_python_swp_nomove() {
     };
     let flags = SharedFlags::from_settings(&settings, true);
     let rules = LayoutRules::default();
-    let mut snapshots = HashMap::new();
-    let mut states = HashMap::new();
-    let mut stale_miss = HashMap::new();
-    let evaluation = tick(
-        &api,
-        &pids,
-        &settings,
-        &rules,
-        &mut snapshots,
-        &mut states,
-        &mut stale_miss,
-        &flags,
-    );
+    let mut caches = EngineCaches::new();
+    let evaluation = tick(&api, &pids, &settings, &rules, &mut caches, &flags);
     assert!(
         evaluation
             .actions
@@ -139,7 +116,7 @@ fn view_resize_keeps_child_top_left_like_python_swp_nomove() {
     assert_eq!(rect.width(), 581);
     assert_eq!(rect.height(), 1001);
     assert!(
-        !snapshots.keys().any(|id| id.hwnd == 101),
+        !caches.snapshots.keys().any(|id| id.hwnd == 101),
         "view-resize hwnd must not be in restore snapshots"
     );
 
@@ -147,7 +124,7 @@ fn view_resize_keeps_child_top_left_like_python_swp_nomove() {
     // SetWindowPos. That would treat 1338,38 as parent-client coordinates
     // and leave KakaoTalk's client area black on the next launch.
     flags.enabled.store(false, Ordering::SeqCst);
-    let (failures, err) = restore_all(&api, &mut snapshots);
+    let (failures, err) = caches.drain_restore_all(&api);
     assert_eq!((failures, err.as_str()), (0, ""));
     let after_stop = api.get_window_rect(101).expect("child after restore");
     assert_eq!(after_stop.left, 1338);

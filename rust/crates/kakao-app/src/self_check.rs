@@ -13,19 +13,43 @@ pub fn run(as_json: bool, report_path: Option<&Path>, strict: bool) -> i32 {
     let appdata_ok = paths.appdata_dir.is_dir();
     let appdata_writable = probe_writable(&paths.appdata_dir);
     let win32_ok = cfg!(windows);
-    let mut warnings = bootstrap_warnings;
-    warnings.extend(settings_warnings);
-    warnings.extend(rules_warnings);
-    let mut core_ok = win32_ok && appdata_ok;
+
+    // Config-load warnings describe successful self-healing (a bad field kept
+    // at its default, a swapped banner range, an old *.broken backup). They are
+    // informational: failing --strict-self-check on them made the release build
+    // depend on whatever happened to be in the build machine's %APPDATA%.
+    let mut info_warnings = bootstrap_warnings;
+    info_warnings.extend(settings_warnings);
+    info_warnings.extend(rules_warnings);
+    let mut core_warnings: Vec<String> = Vec::new();
     if !appdata_writable {
-        warnings.push("APPDATA 디렉터리에 쓸 수 없습니다.".into());
-        if strict {
-            core_ok = false;
-        }
+        core_warnings.push("APPDATA 디렉터리에 쓸 수 없습니다.".into());
     }
-    if strict && !warnings.is_empty() {
+
+    let registry = probe_registry();
+    if !registry.readable {
+        core_warnings.push("HKCU Run 레지스트리를 읽을 수 없습니다.".into());
+    }
+    if !registry.writable {
+        core_warnings
+            .push("HKCU Run 레지스트리에 쓸 수 없어 시작프로그램 등록이 실패합니다.".into());
+    }
+    let process_scan = probe_process_scan();
+    if !process_scan.enumerated {
+        core_warnings.push("프로세스 목록을 열거하지 못했습니다.".into());
+    }
+    let run_command = crate::startup::current_command();
+    let run_health = crate::startup::registration_health(
+        run_command.as_deref(),
+        &crate::startup::build_command(),
+    );
+
+    let mut core_ok = win32_ok && appdata_ok;
+    if strict && !core_warnings.is_empty() {
         core_ok = false;
     }
+    let mut warnings: Vec<String> = core_warnings.clone();
+    warnings.extend(info_warnings.clone());
     let mut exit_code = if core_ok { 0 } else { 1 };
     let core_label = if core_ok { "ok" } else { "fail" };
     let mut payload = json!({
@@ -34,7 +58,15 @@ pub fn run(as_json: bool, report_path: Option<&Path>, strict: bool) -> i32 {
         "appdata_ok": appdata_ok,
         "appdata_writable": appdata_writable,
         "settings_enabled": settings.enabled,
+        "registry_run_readable": registry.readable,
+        "registry_run_writable": registry.writable,
+        "run_command": run_command,
+        "run_command_health": run_health,
+        "process_scan_ok": process_scan.enumerated,
+        "kakaotalk_process_count": process_scan.kakaotalk_count,
         "warnings": warnings,
+        "core_warnings": core_warnings,
+        "info_warnings": info_warnings,
         "strict": strict,
         "core": core_label,
         "summary": {
@@ -88,12 +120,69 @@ pub fn run(as_json: bool, report_path: Option<&Path>, strict: bool) -> i32 {
             serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".into())
         );
     } else {
-        println!("self-check version={VERSION} windows={win32_ok} appdata_ok={appdata_ok}");
+        println!(
+            "self-check version={VERSION} windows={win32_ok} appdata_ok={appdata_ok} registry_run={}/{} process_scan={} run_command={run_health}",
+            registry.readable, registry.writable, process_scan.enumerated
+        );
         for warning in &warnings {
             println!("warning: {warning}");
         }
     }
     exit_code
+}
+
+struct RegistryProbe {
+    readable: bool,
+    writable: bool,
+}
+
+/// README promises `--self-check` inspects the registry. Read and write access
+/// are probed separately because the startup toggle needs both.
+fn probe_registry() -> RegistryProbe {
+    #[cfg(windows)]
+    {
+        RegistryProbe {
+            readable: kakao_win32::startup::probe_run_key_readable(),
+            writable: kakao_win32::startup::probe_run_key_writable(),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        RegistryProbe {
+            readable: false,
+            writable: false,
+        }
+    }
+}
+
+struct ProcessProbe {
+    enumerated: bool,
+    kakaotalk_count: usize,
+}
+
+/// README promises `--self-check` inspects process discovery. An empty result
+/// is normal (KakaoTalk may be closed); a failed snapshot is not.
+fn probe_process_scan() -> ProcessProbe {
+    #[cfg(windows)]
+    {
+        match kakao_win32::process::try_process_ids("kakaotalk.exe") {
+            Some(pids) => ProcessProbe {
+                enumerated: true,
+                kakaotalk_count: pids.len(),
+            },
+            None => ProcessProbe {
+                enumerated: false,
+                kakaotalk_count: 0,
+            },
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        ProcessProbe {
+            enumerated: false,
+            kakaotalk_count: 0,
+        }
+    }
 }
 
 fn probe_writable(dir: &Path) -> bool {

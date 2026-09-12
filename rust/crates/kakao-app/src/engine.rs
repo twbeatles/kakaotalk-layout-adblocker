@@ -1,22 +1,33 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use kakao_core::{
-    evaluate_graph_with_states, CandidateState, Evaluation, LayoutRules, WindowGraph,
-    WindowIdentity,
+    evaluate_graph_for_apply, evaluate_graph_with_states, CandidateState, Evaluation, LayoutRules,
+    WindowGraph, WindowIdentity,
 };
 use kakao_win32::api::{
     Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, SW_SHOW, WM_CLOSE,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::AppSettings;
 use crate::graph_build::build_graph;
 
-const RESTORE_MISS_THRESHOLD: u32 = 2;
+/// Consecutive ticks a hidden window must go unmatched before it is restored.
+pub const RESTORE_MISS_THRESHOLD: u32 = 2;
+/// After this many consecutive restore failures a window stops being retried
+/// every tick and falls back to the long cooldown below.
+const RESTORE_MAX_ATTEMPTS: u32 = 5;
+/// ~60s at the default 200ms reconciliation. A window can become restorable
+/// again later (for example when KakaoTalk's main window is reopened), so the
+/// engine keeps retrying — just rarely, and without repeating the warning.
+const RESTORE_GIVEUP_COOLDOWN_TICKS: u32 = 300;
+/// How long after the last WinEvent the engine treats KakaoTalk as "active"
+/// and reconciles at `poll_interval_ms` instead of `idle_poll_interval_ms`.
+const ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct RestoreSnapshot {
@@ -26,6 +37,82 @@ pub struct RestoreSnapshot {
     pub top_level: bool,
 }
 
+/// Per-window bookkeeping for the stale-hide restore path.
+#[derive(Clone, Debug, Default)]
+pub struct StaleState {
+    /// Consecutive ticks this hidden window was not matched as an ad.
+    pub miss_streak: u32,
+    /// Consecutive failed restore attempts. `0` means "not currently failing".
+    pub attempts: u32,
+    /// Ticks to skip before the next retry (exponential backoff).
+    pub cooldown: u32,
+    /// Whether the failure was already reported, so it is logged only once.
+    pub warned: bool,
+}
+
+/// Worker-owned caches. Bundled so the tick signature stays small and so the
+/// cache-cleanup clock has a home.
+#[derive(Default)]
+pub struct EngineCaches {
+    pub snapshots: HashMap<WindowIdentity, RestoreSnapshot>,
+    pub states: HashMap<WindowIdentity, CandidateState>,
+    pub stale: HashMap<WindowIdentity, StaleState>,
+    last_cleanup: Option<Instant>,
+}
+
+impl EngineCaches {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of windows currently stuck in a failed restore.
+    pub fn restore_failure_count(&self) -> u32 {
+        u32::try_from(
+            self.stale
+                .values()
+                .filter(|state| state.attempts > 0)
+                .count(),
+        )
+        .unwrap_or(u32::MAX)
+    }
+
+    /// Tray "복원 실패 초기화": forget the failure bookkeeping so every pending
+    /// snapshot gets a fresh, immediate retry.
+    pub fn clear_restore_failures(&mut self) {
+        for state in self.stale.values_mut() {
+            state.attempts = 0;
+            state.cooldown = 0;
+            state.warned = false;
+        }
+    }
+
+    /// Restore everything and drop stale bookkeeping for whatever came back.
+    pub fn drain_restore_all(&mut self, api: &dyn Win32Api) -> (u32, String) {
+        let result = restore_all(api, &mut self.snapshots);
+        let Self {
+            snapshots, stale, ..
+        } = self;
+        stale.retain(|identity, _| snapshots.contains_key(identity));
+        result
+    }
+
+    pub fn clear_transient(&mut self) {
+        self.states.clear();
+        self.stale.clear();
+        self.last_cleanup = None;
+    }
+
+    fn cleanup_due(&mut self, interval: Duration) -> bool {
+        match self.last_cleanup {
+            Some(at) if at.elapsed() < interval => false,
+            _ => {
+                self.last_cleanup = Some(Instant::now());
+                true
+            }
+        }
+    }
+}
+
 pub struct SharedFlags {
     pub enabled: Arc<AtomicBool>,
     pub aggressive: Arc<AtomicBool>,
@@ -33,7 +120,18 @@ pub struct SharedFlags {
     pub apply: Arc<AtomicBool>,
     pub startup: Arc<AtomicBool>,
     pub reset_restore: Arc<AtomicBool>,
+    /// Gauge: windows currently stuck in a failed restore (not a running total).
     pub restore_failures: Arc<AtomicU32>,
+    /// Gauge: confirmed KakaoTalk main windows seen by the last evaluation.
+    pub main_windows: Arc<AtomicU32>,
+    /// Running total of windows this process actually hid.
+    pub hidden_windows: Arc<AtomicU32>,
+    /// Running total of windows confirmed destroyed after `WM_CLOSE`.
+    pub closed_windows: Arc<AtomicU32>,
+    /// Running total of applied main-view resizes.
+    pub resized_windows: Arc<AtomicU32>,
+    /// Most recent engine-level error, surfaced in the tray status.
+    pub last_error: Arc<Mutex<String>>,
 }
 
 impl SharedFlags {
@@ -46,7 +144,26 @@ impl SharedFlags {
             startup: Arc::new(AtomicBool::new(settings.run_on_startup)),
             reset_restore: Arc::new(AtomicBool::new(false)),
             restore_failures: Arc::new(AtomicU32::new(0)),
+            main_windows: Arc::new(AtomicU32::new(0)),
+            hidden_windows: Arc::new(AtomicU32::new(0)),
+            closed_windows: Arc::new(AtomicU32::new(0)),
+            resized_windows: Arc::new(AtomicU32::new(0)),
+            last_error: Arc::new(Mutex::new(String::new())),
         })
+    }
+
+    pub fn set_last_error(&self, message: &str) {
+        if let Ok(mut guard) = self.last_error.lock() {
+            guard.clear();
+            guard.push_str(message);
+        }
+    }
+
+    pub fn last_error_text(&self) -> String {
+        self.last_error
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -101,7 +218,26 @@ pub fn apply_evaluation(
         if !precheck(*hwnd) {
             continue;
         }
-        let _ = api.send_message_timeout(*hwnd, WM_CLOSE, 0, 0, 500);
+        let (delivered, _) = api.send_message_timeout(*hwnd, WM_CLOSE, 0, 0, 500);
+        // A close request is only a request. Record what actually happened so
+        // a KakaoTalk UI change that starts refusing WM_CLOSE is diagnosable
+        // from the log instead of silently relying on the hide fallback.
+        // DEBUG, not WARN: a surviving popup is re-evaluated every tick.
+        if !api.is_window(*hwnd) {
+            flags.closed_windows.fetch_add(1, Ordering::SeqCst);
+            debug!(hwnd = *hwnd, "window destroyed by WM_CLOSE");
+        } else if delivered {
+            debug!(
+                hwnd = *hwnd,
+                "window refused WM_CLOSE; hide/zero-size fallback applies"
+            );
+        } else {
+            debug!(
+                hwnd = *hwnd,
+                error = api.get_last_error(),
+                "WM_CLOSE was not delivered; hide/zero-size fallback applies"
+            );
+        }
     }
     for hwnd in &evaluation.actions.hide {
         if !precheck(*hwnd) {
@@ -110,7 +246,12 @@ pub fn apply_evaluation(
         if let Some(snap) = capture_snapshot(api, graph, *hwnd) {
             snapshots.entry(snap.identity.clone()).or_insert(snap);
         }
-        let _ = api.show_window(*hwnd, SW_HIDE);
+        // ShowWindow returns non-zero only when the window was previously
+        // visible, so this counts newly hidden windows rather than the
+        // per-tick re-application on an already hidden one.
+        if api.show_window(*hwnd, SW_HIDE) {
+            flags.hidden_windows.fetch_add(1, Ordering::SeqCst);
+        }
     }
     for pos in &evaluation.actions.set_pos {
         if pos.len() < 5 {
@@ -134,18 +275,21 @@ pub fn apply_evaluation(
                 snapshots.entry(snap.identity.clone()).or_insert(snap);
             }
         }
-        let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+        let mut swp_flags = SWP_NOZORDER | SWP_NOACTIVATE;
         if is_view_resize {
-            flags |= SWP_NOMOVE;
+            swp_flags |= SWP_NOMOVE;
         }
-        let _ = api.set_window_pos(
+        let applied = api.set_window_pos(
             hwnd,
             pos[1] as i32,
             pos[2] as i32,
             width as i32,
             height as i32,
-            flags,
+            swp_flags,
         );
+        if applied && is_view_resize {
+            flags.resized_windows.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -200,72 +344,128 @@ fn restore_snapshot(api: &dyn Win32Api, snap: &RestoreSnapshot, last_error: &mut
     ok
 }
 
+/// Backoff before the next restore attempt, in reconciliation ticks.
+fn retry_cooldown_ticks(attempts: u32) -> u32 {
+    if attempts >= RESTORE_MAX_ATTEMPTS {
+        return RESTORE_GIVEUP_COOLDOWN_TICKS;
+    }
+    1u32 << attempts.saturating_sub(1).min(4)
+}
+
+/// Restore windows this process hid that no longer look like ads.
+///
+/// A window whose ancestors are hidden (KakaoTalk closed to tray) can refuse to
+/// become visible again for as long as the user leaves it closed. Retrying that
+/// every tick would emit a warning about five times a second forever, so
+/// failures back off exponentially and are logged once per window.
 fn restore_stale_hidden(
     api: &dyn Win32Api,
-    snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+    caches: &mut EngineCaches,
     matched: &HashSet<WindowIdentity>,
-    stale_miss: &mut HashMap<WindowIdentity, u32>,
 ) -> (u32, String) {
-    let mut failures = 0u32;
     let mut last_error = String::new();
-    let pending: Vec<WindowIdentity> = snapshots.keys().cloned().collect();
+    let pending: Vec<WindowIdentity> = caches.snapshots.keys().cloned().collect();
     for identity in pending {
         if matched.contains(&identity) {
-            stale_miss.remove(&identity);
+            caches.stale.remove(&identity);
             continue;
         }
-        let misses = stale_miss.entry(identity.clone()).or_insert(0);
-        *misses = misses.saturating_add(1);
-        if *misses < RESTORE_MISS_THRESHOLD {
+        let due = {
+            let state = caches.stale.entry(identity.clone()).or_default();
+            state.miss_streak = state.miss_streak.saturating_add(1);
+            if state.miss_streak < RESTORE_MISS_THRESHOLD {
+                false
+            } else if state.cooldown > 0 {
+                state.cooldown -= 1;
+                false
+            } else {
+                true
+            }
+        };
+        if !due {
             continue;
         }
-        let Some(snap) = snapshots.remove(&identity) else {
+        let Some(snap) = caches.snapshots.remove(&identity) else {
+            caches.stale.remove(&identity);
             continue;
         };
         if !identity_matches(api, &snap.identity) {
-            stale_miss.remove(&identity);
+            caches.stale.remove(&identity);
             continue;
         }
         if restore_snapshot(api, &snap, &mut last_error) {
-            stale_miss.remove(&identity);
+            caches.stale.remove(&identity);
             continue;
         }
-        failures += 1;
-        snapshots.insert(identity.clone(), snap);
-        stale_miss.insert(identity, RESTORE_MISS_THRESHOLD);
+        let hwnd = identity.hwnd;
+        caches.snapshots.insert(identity.clone(), snap);
+        let state = caches.stale.entry(identity).or_default();
+        state.attempts = state.attempts.saturating_add(1);
+        state.cooldown = retry_cooldown_ticks(state.attempts);
+        if !state.warned {
+            state.warned = true;
+            warn!(
+                hwnd,
+                attempts = state.attempts,
+                cooldown_ticks = state.cooldown,
+                last_error = %last_error,
+                "stale hide restore failed; backing off and retrying quietly"
+            );
+        }
     }
-    (failures, last_error)
+    (caches.restore_failure_count(), last_error)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn tick(
     api: &dyn Win32Api,
     pids: &[i64],
     settings: &AppSettings,
     rules: &LayoutRules,
-    snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
-    states: &mut HashMap<WindowIdentity, CandidateState>,
-    stale_miss: &mut HashMap<WindowIdentity, u32>,
+    caches: &mut EngineCaches,
     flags: &SharedFlags,
 ) -> Evaluation {
     let mut core = settings.to_core();
     core.enabled = flags.enabled.load(Ordering::SeqCst);
     core.aggressive_mode = flags.aggressive.load(Ordering::SeqCst);
-    if pids.is_empty() && snapshots.is_empty() {
+    if pids.is_empty() && caches.snapshots.is_empty() {
         return Evaluation::default();
     }
     let graph = build_graph(api, pids);
-    let evaluation = evaluate_graph_with_states(&graph, &core, rules, states);
-    prune_gone_identities(&graph, snapshots, states, stale_miss);
-    if flags.apply.load(Ordering::SeqCst) && core.enabled {
+    let apply_mode = flags.apply.load(Ordering::SeqCst) && core.enabled;
+    // The diagnostic `candidates` payload costs a second full traversal and is
+    // discarded on the apply path, so only build it when something reads it.
+    let evaluation = if apply_mode {
+        evaluate_graph_for_apply(&graph, &core, rules, &mut caches.states)
+    } else {
+        evaluate_graph_with_states(&graph, &core, rules, &mut caches.states)
+    };
+    flags.main_windows.store(
+        u32::try_from(evaluation.state.main_window_count).unwrap_or(0),
+        Ordering::SeqCst,
+    );
+
+    let cleanup_interval =
+        Duration::from_millis(u64::from(settings.cache_cleanup_interval_ms.max(100)));
+    if caches.cleanup_due(cleanup_interval) {
+        prune_gone_identities(&graph, caches);
+    }
+
+    if apply_mode {
         let pid_set: HashSet<i64> = pids.iter().copied().collect();
-        apply_evaluation(api, &graph, &evaluation, snapshots, &pid_set, flags);
-        if !snapshots.is_empty() {
+        apply_evaluation(
+            api,
+            &graph,
+            &evaluation,
+            &mut caches.snapshots,
+            &pid_set,
+            flags,
+        );
+        if !caches.snapshots.is_empty() {
             let matched = matched_identities(&graph, &evaluation);
-            let (failures, err) = restore_stale_hidden(api, snapshots, &matched, stale_miss);
-            if failures > 0 {
-                flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
-                warn!(failures, last_error = %err, "stale hide restore had failures");
+            let (failures, err) = restore_stale_hidden(api, caches, &matched);
+            flags.restore_failures.store(failures, Ordering::SeqCst);
+            if failures > 0 && !err.is_empty() {
+                flags.set_last_error(&err);
             }
         }
     } else {
@@ -283,15 +483,16 @@ pub fn tick(
     evaluation
 }
 
-fn prune_gone_identities(
-    graph: &WindowGraph,
-    snapshots: &HashMap<WindowIdentity, RestoreSnapshot>,
-    states: &mut HashMap<WindowIdentity, CandidateState>,
-    stale_miss: &mut HashMap<WindowIdentity, u32>,
-) {
+fn prune_gone_identities(graph: &WindowGraph, caches: &mut EngineCaches) {
     let live: HashSet<WindowIdentity> = graph.nodes.values().map(|node| node.identity()).collect();
+    let EngineCaches {
+        snapshots,
+        states,
+        stale,
+        ..
+    } = caches;
     states.retain(|id, _| live.contains(id) || snapshots.contains_key(id));
-    stale_miss.retain(|id, _| live.contains(id) || snapshots.contains_key(id));
+    stale.retain(|id, _| live.contains(id) || snapshots.contains_key(id));
 }
 
 fn matched_identities(graph: &WindowGraph, evaluation: &Evaluation) -> HashSet<WindowIdentity> {
@@ -315,36 +516,44 @@ fn matched_identities(graph: &WindowGraph, evaluation: &Evaluation) -> HashSet<W
     matched
 }
 
+fn report_restore(flags: &SharedFlags, failures: u32, err: &str, context: &str) {
+    flags.restore_failures.store(failures, Ordering::SeqCst);
+    if failures > 0 {
+        flags.set_last_error(err);
+        warn!(failures, last_error = %err, "{context}");
+    }
+}
+
 pub fn spawn_worker(
     api: Arc<dyn Win32Api>,
     flags: Arc<SharedFlags>,
     settings: AppSettings,
     rules: LayoutRules,
-) -> thread::JoinHandle<HashMap<WindowIdentity, RestoreSnapshot>> {
+) -> thread::JoinHandle<EngineCaches> {
     thread::spawn(move || {
         info!("engine worker thread started");
-        let mut snapshots = HashMap::new();
-        let mut states = HashMap::new();
-        let mut stale_miss = HashMap::new();
+        let mut caches = EngineCaches::new();
         let mut last_pids: HashSet<i64> = HashSet::new();
         let mut cached_pids: Vec<i64> = Vec::new();
         let mut last_pid_scan = Instant::now() - Duration::from_secs(60);
         let mut burst_left = 0u32;
         let mut last_full = Instant::now() - Duration::from_secs(10);
         let mut was_enabled = flags.enabled.load(Ordering::SeqCst);
+        let mut last_event_at: Option<Instant> = None;
         #[cfg(windows)]
-        let hook = kakao_win32::event_hook::EventHook::install();
+        let mut hook: Option<kakao_win32::event_hook::EventHook> = None;
+        #[cfg(windows)]
+        let mut hooked_pids: HashSet<i64> = HashSet::new();
         while !flags.stopping.load(Ordering::SeqCst) {
             if flags.reset_restore.swap(false, Ordering::SeqCst) {
+                caches.clear_restore_failures();
                 flags.restore_failures.store(0, Ordering::SeqCst);
+                flags.set_last_error("");
             }
             let enabled_now = flags.enabled.load(Ordering::SeqCst);
             if was_enabled && !enabled_now && flags.apply.load(Ordering::SeqCst) {
-                let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
-                if failures > 0 {
-                    flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
-                    warn!(failures, last_error = %err, "restore on disable had failures");
-                }
+                let (failures, err) = caches.drain_restore_all(api.as_ref());
+                report_restore(&flags, failures, &err, "restore on disable had failures");
             }
             was_enabled = enabled_now;
             if !enabled_now {
@@ -381,11 +590,28 @@ pub fn spawn_worker(
                 last_pids = pid_set.clone();
             }
 
+            // Scope the WinEvent hook to KakaoTalk. A session-wide hook also
+            // receives every EVENT_OBJECT_LOCATIONCHANGE from every other
+            // process, which can fill the bounded channel and drop the
+            // KakaoTalk events this engine actually needs.
+            #[cfg(windows)]
+            if pid_set != hooked_pids {
+                hook = None;
+                if !cached_pids.is_empty() {
+                    hook = kakao_win32::event_hook::EventHook::install_for_pids(&cached_pids);
+                    if hook.is_none() {
+                        warn!("failed to install WinEvent hook; falling back to polling");
+                    }
+                }
+                hooked_pids = pid_set.clone();
+            }
+
             let mut events = Vec::new();
             #[cfg(windows)]
             if let Some(hook) = hook.as_ref() {
                 events = hook.drain();
-                // Filter events: only retain events belonging to KakaoTalk windows
+                // The hook is PID-scoped already; this is defence in depth for
+                // the window between a KakaoTalk restart and the re-install.
                 if !pid_set.is_empty() {
                     events.retain(|ev| {
                         let pid = api.get_window_thread_process_id(ev.hwnd);
@@ -395,21 +621,31 @@ pub fn spawn_worker(
                     events.clear();
                 }
             }
+            if !events.is_empty() {
+                last_event_at = Some(Instant::now());
+            }
 
             let idle_ms = u64::from(settings.idle_poll_interval_ms.max(200));
-            let active_ms = u64::from(settings.poll_interval_ms.max(50));
+            // `poll_interval_ms` is the active cadence: while KakaoTalk is
+            // producing window events the engine reconciles this often, and it
+            // relaxes back to `idle_poll_interval_ms` once things go quiet.
+            let active_ms = u64::from(settings.poll_interval_ms.max(50)).min(idle_ms);
+            let active = last_event_at.is_some_and(|at| at.elapsed() < ACTIVE_WINDOW);
+            let recon_ms = if active { active_ms } else { idle_ms };
 
             // When KakaoTalk is not running, cleanup any remaining snapshots and stay completely idle.
             if cached_pids.is_empty() {
-                if !snapshots.is_empty() {
-                    let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
-                    if failures > 0 {
-                        flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
-                        warn!(failures, last_error = %err, "restore on kakaotalk exit had failures");
-                    }
+                if !caches.snapshots.is_empty() {
+                    let (failures, err) = caches.drain_restore_all(api.as_ref());
+                    report_restore(
+                        &flags,
+                        failures,
+                        &err,
+                        "restore on kakaotalk exit had failures",
+                    );
                 }
-                stale_miss.clear();
-                states.clear();
+                caches.clear_transient();
+                last_event_at = None;
                 #[cfg(windows)]
                 if let Some(hook) = hook.as_ref() {
                     hook.wait_message(Duration::from_millis(idle_ms));
@@ -419,18 +655,17 @@ pub fn spawn_worker(
                 continue;
             }
 
-            let due_recon = last_full.elapsed() >= Duration::from_millis(idle_ms);
+            let due_recon = last_full.elapsed() >= Duration::from_millis(recon_ms);
             let due_burst = burst_left > 0;
             if events.is_empty() && !due_recon && !due_burst {
+                let remaining = Duration::from_millis(recon_ms).saturating_sub(last_full.elapsed());
+                let wait = remaining.max(Duration::from_millis(10));
                 #[cfg(windows)]
                 if let Some(hook) = hook.as_ref() {
-                    let remaining =
-                        Duration::from_millis(idle_ms).saturating_sub(last_full.elapsed());
-                    let wait = remaining.max(Duration::from_millis(10));
                     hook.wait_message(wait);
                     continue;
                 }
-                thread::sleep(Duration::from_millis(active_ms));
+                thread::sleep(wait);
                 continue;
             }
 
@@ -458,9 +693,7 @@ pub fn spawn_worker(
                 &cached_pids,
                 &settings,
                 &rules,
-                &mut snapshots,
-                &mut states,
-                &mut stale_miss,
+                &mut caches,
                 &flags,
             );
             last_full = Instant::now();
@@ -476,12 +709,55 @@ pub fn spawn_worker(
             flags.stopping.load(Ordering::SeqCst)
         );
         if flags.apply.load(Ordering::SeqCst) {
-            let (failures, err) = restore_all(api.as_ref(), &mut snapshots);
-            if failures > 0 {
-                flags.restore_failures.fetch_add(failures, Ordering::SeqCst);
-                warn!(failures, last_error = %err, "restore on stop had failures");
-            }
+            let (failures, err) = caches.drain_restore_all(api.as_ref());
+            report_restore(&flags, failures, &err, "restore on stop had failures");
         }
-        snapshots
+        caches
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_cooldown_backs_off_then_settles_on_the_long_interval() {
+        assert_eq!(retry_cooldown_ticks(1), 1);
+        assert_eq!(retry_cooldown_ticks(2), 2);
+        assert_eq!(retry_cooldown_ticks(3), 4);
+        assert_eq!(retry_cooldown_ticks(4), 8);
+        assert_eq!(
+            retry_cooldown_ticks(RESTORE_MAX_ATTEMPTS),
+            RESTORE_GIVEUP_COOLDOWN_TICKS
+        );
+        assert_eq!(retry_cooldown_ticks(50), RESTORE_GIVEUP_COOLDOWN_TICKS);
+    }
+
+    #[test]
+    fn restore_failure_count_is_a_gauge_not_a_running_total() {
+        let mut caches = EngineCaches::new();
+        assert_eq!(caches.restore_failure_count(), 0);
+        caches.stale.insert(
+            WindowIdentity {
+                hwnd: 1,
+                pid: 2,
+                class_name: "A".into(),
+            },
+            StaleState {
+                attempts: 7,
+                ..StaleState::default()
+            },
+        );
+        caches.stale.insert(
+            WindowIdentity {
+                hwnd: 2,
+                pid: 2,
+                class_name: "A".into(),
+            },
+            StaleState::default(),
+        );
+        assert_eq!(caches.restore_failure_count(), 1);
+        caches.clear_restore_failures();
+        assert_eq!(caches.restore_failure_count(), 0);
+    }
 }
