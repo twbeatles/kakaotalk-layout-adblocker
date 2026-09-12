@@ -1,7 +1,7 @@
 #![cfg(windows)]
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_BINARY, REG_OPTION_NON_VOLATILE, REG_SZ,
@@ -26,28 +26,34 @@ pub fn startup_approved_enable_blob() -> [u8; 12] {
     blob
 }
 
-/// Whether the HKCU Run key can be opened for reading.
+/// A missing Run key is not an access problem: a fresh Windows profile may not
+/// have `HKCU\...\Run` yet, and `set_run_command` creates it on demand. Only a
+/// real failure (permissions, corruption) counts as inaccessible.
+pub fn run_key_status_is_accessible(status: WIN32_ERROR) -> bool {
+    status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND
+}
+
+/// Whether the HKCU Run key can be read (or legitimately does not exist yet).
 pub fn probe_run_key_readable() -> bool {
     let mut key = HKEY::default();
     let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_READ, &mut key) };
-    if status != ERROR_SUCCESS {
-        return false;
+    if status == ERROR_SUCCESS {
+        let _ = unsafe { RegCloseKey(key) };
     }
-    let _ = unsafe { RegCloseKey(key) };
-    true
+    run_key_status_is_accessible(status)
 }
 
-/// Whether the HKCU Run key can be opened for writing. Opening with
-/// KEY_SET_VALUE checks the ACL without touching any value.
+/// Whether the HKCU Run key can be written. Opening with KEY_SET_VALUE checks
+/// the ACL without touching any value; a missing key is fine because
+/// `set_run_command` creates it.
 pub fn probe_run_key_writable() -> bool {
     let mut key = HKEY::default();
     let status =
         unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_SET_VALUE, &mut key) };
-    if status != ERROR_SUCCESS {
-        return false;
+    if status == ERROR_SUCCESS {
+        let _ = unsafe { RegCloseKey(key) };
     }
-    let _ = unsafe { RegCloseKey(key) };
-    true
+    run_key_status_is_accessible(status)
 }
 
 pub fn get_run_command() -> Option<String> {
@@ -100,8 +106,22 @@ pub fn get_run_command() -> Option<String> {
 
 pub fn set_run_command(command: &str) -> bool {
     let mut key = HKEY::default();
-    let status =
-        unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_SET_VALUE, &mut key) };
+    // RegCreateKeyExW opens the key when it exists and creates it when it does
+    // not. A fresh profile can be missing HKCU\...\Run entirely, and the old
+    // open-only call made the startup toggle fail on such a machine.
+    let status = unsafe {
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            RUN_KEY,
+            None,
+            PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            None,
+            &mut key,
+            None,
+        )
+    };
     if status != ERROR_SUCCESS {
         return false;
     }
@@ -219,6 +239,26 @@ mod tests {
         assert!(startup_approved_is_enabled(&[]));
         assert!(!startup_approved_is_enabled(&[0x03, 0, 0, 0]));
         assert!(!startup_approved_is_enabled(&[0x07, 0, 0, 0]));
+    }
+
+    #[test]
+    fn missing_run_key_is_accessible_but_real_errors_are_not() {
+        // A fresh Windows profile (and every GitHub hosted runner) can be
+        // missing HKCU\...\Run entirely. Treating that as an access failure
+        // made --self-check report a core failure and broke --strict-self-check
+        // on CI while passing on any developer machine that had the key.
+        assert!(run_key_status_is_accessible(ERROR_SUCCESS));
+        assert!(run_key_status_is_accessible(ERROR_FILE_NOT_FOUND));
+        assert!(!run_key_status_is_accessible(WIN32_ERROR(5))); // ERROR_ACCESS_DENIED
+        assert!(!run_key_status_is_accessible(WIN32_ERROR(1018))); // ERROR_KEY_DELETED
+    }
+
+    #[test]
+    fn probes_do_not_depend_on_the_run_key_existing() {
+        // Whatever this host looks like, both probes must agree that the key is
+        // reachable; only a permission/corruption error may report false.
+        assert!(probe_run_key_readable());
+        assert!(probe_run_key_writable());
     }
 
     #[test]

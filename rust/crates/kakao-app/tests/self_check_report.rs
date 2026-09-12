@@ -1,5 +1,16 @@
 use kakao_app::self_check;
 
+/// `isolated_appdata` mutates the process-wide APPDATA env var, and cargo runs
+/// the tests in this file on parallel threads. Serialising them keeps one test
+/// from reading another test's APPDATA halfway through `self_check::run`.
+static APPDATA_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_appdata() -> std::sync::MutexGuard<'static, ()> {
+    APPDATA_GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn isolated_appdata() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "kakao_self_check_appdata_{}_{}",
@@ -16,6 +27,7 @@ fn isolated_appdata() -> std::path::PathBuf {
 
 #[test]
 fn report_path_directory_returns_nonzero() {
+    let _guard = lock_appdata();
     let _appdata = isolated_appdata();
     let dir = std::env::temp_dir().join(format!(
         "kakao_self_check_dir_{}",
@@ -32,6 +44,7 @@ fn report_path_directory_returns_nonzero() {
 
 #[test]
 fn report_write_success_is_zero_when_core_ok() {
+    let _guard = lock_appdata();
     let _appdata = isolated_appdata();
     let dir = std::env::temp_dir().join(format!(
         "kakao_self_check_ok_{}",
@@ -54,6 +67,7 @@ fn report_write_success_is_zero_when_core_ok() {
 fn report_includes_registry_and_process_probes() {
     // README documents --self-check as inspecting the registry and process
     // discovery; it previously only looked at APPDATA and the config files.
+    let _guard = lock_appdata();
     let _appdata = isolated_appdata();
     let dir = std::env::temp_dir().join(format!(
         "kakao_self_check_probe_{}",
@@ -84,7 +98,18 @@ fn report_includes_registry_and_process_probes() {
         );
     }
     if cfg!(windows) {
-        assert_eq!(payload["registry_run_readable"], serde_json::json!(true));
+        // A host without HKCU\...\Run (fresh profile, CI runner) must still
+        // report the key as reachable; only a permission error may say false.
+        assert_eq!(
+            payload["registry_run_readable"],
+            serde_json::json!(true),
+            "Run key must read as accessible even when the key does not exist"
+        );
+        assert_eq!(
+            payload["registry_run_writable"],
+            serde_json::json!(true),
+            "Run key must write as accessible even when the key does not exist"
+        );
         assert_eq!(payload["process_scan_ok"], serde_json::json!(true));
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -94,6 +119,7 @@ fn report_includes_registry_and_process_probes() {
 fn strict_mode_tolerates_informational_config_warnings() {
     // Self-healing config warnings used to fail --strict-self-check, which made
     // the release build depend on the build machine's %APPDATA% contents.
+    let _guard = lock_appdata();
     let appdata = isolated_appdata();
     std::fs::write(
         appdata.join("layout_rules_v11.json"),
