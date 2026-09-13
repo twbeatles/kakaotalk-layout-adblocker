@@ -219,7 +219,7 @@ Legacy code/assets were moved under `legacy/`:
 
 ### 이 저장소 상태
 
-- **프로젝트**: `kakaotalk-pc-adblock-rust`
+- **프로젝트**: `kakaotalk-layout-adblocker`
 - **Spec Kit 초기화**: `.specify/ 있음`
 - **에이전트 스킬**: Grok=True, Claude=True, Codex/Agy(.agents)=True
 - **활성 기능**: 아직 `specs/` 기능 명세 없음 — `.specify/` 만 준비된 상태

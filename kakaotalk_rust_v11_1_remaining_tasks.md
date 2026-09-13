@@ -1,6 +1,6 @@
 # KakaoTalk PC AdBlocker Rust — v11.1.x 잔여 안정화 작업 지시서
 
-> 대상 저장소: `twbeatles/kakaotalk-pc-adblock-rust`
+> 대상 저장소: `twbeatles/kakaotalk-layout-adblocker`
 > 기준 버전: `v11.1.0`
 > 기준 main 확인 커밋: `021084913557d96a54aa0fe705863a656f88f51c`
 > 목적: Rust 네이티브 전환은 완료된 것으로 간주하고, 남은 기능 미스매치·회귀 위험·문서 정합성·릴리스 완성도를 정리한다.

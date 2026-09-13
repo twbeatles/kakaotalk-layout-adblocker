@@ -9,4 +9,4 @@ def test_release_service_uses_releases_url(monkeypatch):
     )
     ok = ReleaseService.open_releases_page()
     assert ok is True
-    assert called["url"] == "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases"
+    assert called["url"] == "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases"
