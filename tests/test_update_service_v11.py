@@ -53,7 +53,7 @@ class _Response:
         return value
 
     def geturl(self) -> str:
-        return "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/latest/download/update.json"
+        return "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/latest/download/update.json"
 
 
 def test_newer_manifest_fixture_stays_ahead_of_package_version():

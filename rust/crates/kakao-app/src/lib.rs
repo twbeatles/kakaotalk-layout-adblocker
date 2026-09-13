@@ -357,7 +357,7 @@ pub fn run_with_args(args: Args) -> i32 {
                 }
                 TrayCommand::OpenReleases => {
                     let _ = kakao_win32::tray::shell_open(
-                        "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases",
+                        "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases",
                     );
                 }
                 TrayCommand::CheckUpdate => {

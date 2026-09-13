@@ -468,7 +468,7 @@ Port `StartupManager` in `kakao_adblocker/services.py`:
 
 Port `UpdateService` (`services.py` ~502+):
 
-- `MANIFEST_URL` = `https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/latest/download/update.json`
+- `MANIFEST_URL` = `https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/latest/download/update.json`
 - Ed25519 public key `UPDATE_PUBLIC_KEY_B64` in `kakao_adblocker/config/paths.py`
 - Canonical JSON: `json.dumps(..., ensure_ascii=False, sort_keys=True, separators=(",", ":"))`
 - HTTPS only; SHA-256; size cap 512MiB; expiry; artifact URL must be `.../releases/download/v{version}/KakaoTalkLayoutAdBlocker_v11.exe`

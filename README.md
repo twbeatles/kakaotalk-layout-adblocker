@@ -1,6 +1,8 @@
 # 💬 KakaoTalk Layout AdBlocker v11 (Rust Native)
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)
+> 🪟 **Windows용 카카오톡 광고 차단 프로그램** — 카톡 배너 광고·팝업 광고 제거, hosts/DNS 변조 없는 순수 레이아웃 조정 방식, 관리자 권한(UAC) 불필요, Rust 네이티브 초경량 트레이 앱
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)
 [![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.4-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
@@ -10,6 +12,10 @@
 기존 Python 기반 런타임에서 **순수 Rust 네이티브(`kakao-adblock-rs`)로 전면 재작성**되어, Python 설치나 별도 런타임 없이 가볍고 빠르게 동작합니다. 광고 차단 실행은 앱 EXE만으로 가능하고, **자동 업데이트**에는 같은 폴더의 `kakao-updater.exe`가 필요합니다.
 
 `hosts` 파일 수정, DNS 캐시 변조, AdFit 레지스트리 조작, 네트워크 패킷 감청을 **전혀 하지 않고**, 순수 **Win32 레이아웃 조정 및 광고 창 은닉**만으로 동작합니다. 광고 차단 경로 자체는 레지스트리를 쓰지 않으며, 선택적 **시작프로그램 등록**만 `HKCU\...\Run`을 사용합니다. 관리자 권한(UAC)이 필요 없으며, 카카오톡 업데이트나 시스템 환경에 안전합니다.
+
+> **카카오톡 광고 제거**, **카톡 광고 차단 프로그램**, **카카오톡 배너/팝업 광고 없애기** 등으로도 검색되는 오픈소스 도구입니다.
+
+> **In English**: KakaoTalk Layout AdBlocker is a free, open-source Windows tray app that removes KakaoTalk PC banner and popup ads by adjusting window layout only — no hosts/DNS edits, no admin rights, no memory hooking/patching. Rewritten as a native Rust binary (`kakao-adblock-rs`) for near-zero idle CPU/RAM usage. [Download the latest release →](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)
 
 ---
 
@@ -73,7 +79,7 @@ v11.1.0부터 프로그램의 핵심 코어가 **Python에서 순수 Rust로 전
 ## 🚀 빠른 시작 (3단계 사용법)
 
 ### 1단계: 실행 파일 다운로드
-[GitHub Releases](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases)에서 최신 버전의 **`KakaoTalkLayoutAdBlocker_v11.zip`**을 받아 압축을 풉니다. 같은 폴더에 다음 두 파일이 있어야 합니다.
+[GitHub Releases](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)에서 최신 버전의 **`KakaoTalkLayoutAdBlocker_v11.zip`**을 받아 압축을 풉니다. 같은 폴더에 다음 두 파일이 있어야 합니다.
 - `KakaoTalkLayoutAdBlocker_v11.exe` — 광고 차단 앱
 - `kakao-updater.exe` — 자동 업데이트 헬퍼 (앱과 **반드시 같은 폴더**)
 
@@ -301,7 +307,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
      ```powershell
      KakaoTalkLayoutAdBlocker_v11.exe --dump-tree-series
      ```
-  3. 콘솔에 출력된 경로의 `window_dump_series_*.json` 파일을 첨부하여 [GitHub Issues](https://github.com/twbeatles/kakaotalk-pc-adblock-rust/issues)에 제보해 주시면 빠르게 규칙이 업데이트됩니다.
+  3. 콘솔에 출력된 경로의 `window_dump_series_*.json` 파일을 첨부하여 [GitHub Issues](https://github.com/twbeatles/kakaotalk-layout-adblocker/issues)에 제보해 주시면 빠르게 규칙이 업데이트됩니다.
 
 ### Q3. 여러 번 실행하면 중복으로 켜지나요?
 - Windows Named Mutex(`Local\KakaoTalkLayoutAdBlocker_v11`)를 통해 **단일 인스턴스 실행**이 엄격히 보장됩니다. 이미 실행 중인 경우 추가 프로세스는 즉시 안전하게 종료(`exit 0`)됩니다.
@@ -342,8 +348,8 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 
 ```powershell
 # 저장소 클론
-git clone https://github.com/twbeatles/kakaotalk-pc-adblock-rust.git
-cd kakaotalk-pc-adblock-rust
+git clone https://github.com/twbeatles/kakaotalk-layout-adblocker.git
+cd kakaotalk-layout-adblocker
 ```
 
 ### 빌드 및 로컬 실행

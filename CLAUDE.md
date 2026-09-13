@@ -215,7 +215,7 @@
 
 ### 이 저장소 상태
 
-- **프로젝트**: `kakaotalk-pc-adblock-rust`
+- **프로젝트**: `kakaotalk-layout-adblocker`
 - **Spec Kit 초기화**: `.specify/ 있음`
 - **에이전트 스킬**: Grok=True, Claude=True, Codex/Agy(.agents)=True
 - **활성 기능**: 기본 구현은 Rust `kakao-app`. Python v11은 `legacy/python-v11`. 계약 문서는 `kakaotalk_rust_migration_plan.md`와 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md`

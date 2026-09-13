@@ -1,6 +1,6 @@
 # KakaoTalk PC AdBlocker — Rust Native Migration Plan
 
-> 대상 저장소: `twbeatles/kakaotalk-pc-adblock-rust`  
+> 대상 저장소: `twbeatles/kakaotalk-layout-adblocker`  
 > 목적: 기존 Python 구현의 동작/안전성을 보존하면서 Rust 기반 Windows 네이티브 애플리케이션으로 전환한다.  
 > 핵심 전략: **동작 규격 고정 → 순수 Rust 판단 엔진 → Win32 래퍼 → Shadow Mode → 이벤트 기반 감시 → 실제 mutation → UI/업데이터 → Python 제거**  
 > 최우선 원칙: **오탐 방지와 원상복구 안전성이 성능보다 우선한다.**

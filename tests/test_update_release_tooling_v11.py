@@ -21,7 +21,7 @@ def test_build_and_verify_update_manifest(monkeypatch, tmp_path):
 
     assert build_update_manifest.main([
         "--version", "11.0.1", "--tag", "v11.0.1", "--artifact", str(artifact),
-        "--artifact-url", "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/v11.0.1/KakaoTalkLayoutAdBlocker_v11.exe",
+        "--artifact-url", "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/download/v11.0.1/KakaoTalkLayoutAdBlocker_v11.exe",
         "--output", str(output),
     ]) == 0
     assert verify_update_manifest.main(["--manifest", str(output)]) == 0

@@ -12,10 +12,10 @@ use thiserror::Error;
 use crate::config::{UPDATE_PUBLIC_KEY_B64, VERSION};
 
 pub const MANIFEST_URL: &str =
-    "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/latest/download/update.json";
+    "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/latest/download/update.json";
 pub const USER_AGENT: &str = "KakaoTalkLayoutAdBlocker-Updater";
 pub const RELEASE_DOWNLOAD_PREFIX: &str =
-    "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/";
+    "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/download/";
 pub const LEGACY_RELEASE_DOWNLOAD_PREFIX: &str =
     "https://github.com/twbeatles/kakaotalk-pc-adblock-py/releases/download/";
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
@@ -516,10 +516,10 @@ mod tests {
     fn artifact_url_is_pinned() {
         assert_eq!(
             expected_artifact_url("v11.0.2"),
-            "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/v11.0.2/KakaoTalkLayoutAdBlocker_v11.exe"
+            "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/download/v11.0.2/KakaoTalkLayoutAdBlocker_v11.exe"
         );
         assert!(is_valid_artifact_url(
-            "https://github.com/twbeatles/kakaotalk-pc-adblock-rust/releases/download/v11.1.0/KakaoTalkLayoutAdBlocker_v11.exe",
+            "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases/download/v11.1.0/KakaoTalkLayoutAdBlocker_v11.exe",
             "v11.1.0"
         ));
         assert!(is_valid_artifact_url(
