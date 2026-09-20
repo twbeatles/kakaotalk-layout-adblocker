@@ -1,74 +1,26 @@
+pub mod args;
 pub mod config;
+pub mod dialogs;
 pub mod dump;
+pub mod dump_cmd;
 pub mod engine;
 pub mod graph_build;
+pub mod observability;
 pub mod self_check;
 pub mod startup;
+pub mod startup_repair;
 pub mod updater;
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+// `main.rs` (`kakao_app::{Args, ...}`)와의 호환을 위해 CLI 표면을 루트에 유지.
+pub use args::{should_attach_parent_console, Args};
 
-use clap::Parser;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
 use tracing::{error, info};
 
-use config::{ensure_runtime_files, load_rules, load_settings, runtime_paths, VERSION};
-use dump::{dump_payload, dump_payload_with_states, write_json};
+use config::{ensure_runtime_files, load_rules, load_settings, runtime_paths};
 use engine::{spawn_worker, tick, EngineCaches, SharedFlags};
-
-#[derive(Parser, Debug)]
-#[command(name = "kakao-adblock-rs", version = VERSION)]
-pub struct Args {
-    #[arg(long)]
-    pub minimized: bool,
-    #[arg(long, hide = true)]
-    pub startup_launch: bool,
-    #[arg(long)]
-    pub dump_tree: bool,
-    #[arg(long)]
-    pub dump_tree_series: bool,
-    #[arg(long)]
-    pub dump_dir: Option<PathBuf>,
-    #[arg(long, default_value_t = 1000)]
-    pub dump_series_duration_ms: u64,
-    #[arg(long, default_value_t = 100)]
-    pub dump_series_interval_ms: u64,
-    #[arg(long)]
-    pub self_check: bool,
-    #[arg(long, hide = true)]
-    pub strict_self_check: bool,
-    #[arg(long)]
-    pub json: bool,
-    #[arg(long, hide = true)]
-    pub self_check_report: Option<PathBuf>,
-    #[arg(long)]
-    pub shadow: bool,
-    #[arg(long)]
-    pub apply: bool,
-    #[arg(long, hide = true)]
-    pub check_update: bool,
-    #[arg(long, hide = true)]
-    pub startup_trace: Option<PathBuf>,
-    #[arg(long, hide = true)]
-    pub exit_after_startup_ms: Option<u64>,
-}
-
-/// GUI-subsystem release EXE has no console on Explorer double-click.
-/// Attach the parent console only for diagnostic CLI flags, not tray launch.
-pub fn should_attach_parent_console<I, S>(args: I) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    args.into_iter().any(|arg| {
-        let a = arg.as_ref();
-        !matches!(a, "--minimized" | "--startup-launch" | "--apply")
-            && !a.starts_with("--startup-trace")
-            && !a.starts_with("--exit-after-startup-ms")
-    })
-}
 
 pub fn run_with_args(args: Args) -> i32 {
     if !cfg!(windows) {
@@ -79,12 +31,11 @@ pub fn run_with_args(args: Args) -> i32 {
         eprintln!("--dump-series-duration-ms must be <= 10000");
         return 2;
     }
-    let interval = args.dump_series_interval_ms.max(10);
     let paths = runtime_paths();
     let _ = std::fs::create_dir_all(&paths.appdata_dir);
 
     if args.self_check {
-        init_tracing(Some(&paths.log_file), "INFO");
+        observability::init_tracing(Some(&paths.log_file), "INFO");
         return self_check::run(
             args.json,
             args.self_check_report.as_deref(),
@@ -111,7 +62,7 @@ pub fn run_with_args(args: Args) -> i32 {
     let bootstrap_warnings = ensure_runtime_files(&paths);
     let (mut settings, warnings) = load_settings(&paths.settings_file);
     let (rules, rule_warnings) = load_rules(&paths.rules_file);
-    init_tracing(Some(&paths.log_file), &settings.log_level);
+    observability::init_tracing(Some(&paths.log_file), &settings.log_level);
     for warning in bootstrap_warnings
         .into_iter()
         .chain(warnings)
@@ -137,56 +88,7 @@ pub fn run_with_args(args: Args) -> i32 {
 
     if args.dump_tree || args.dump_tree_series {
         let core = settings.to_core();
-        let dump_dir = args.dump_dir.unwrap_or(paths.appdata_dir.clone());
-        if args.dump_tree {
-            let payload = dump_payload(api.as_ref(), &pids, &core, &rules);
-            let empty_windows = payload
-                .get("windows")
-                .and_then(|v| v.as_array())
-                .is_none_or(|a| a.is_empty());
-            let empty_owned = payload
-                .get("owned_popups")
-                .and_then(|v| v.as_array())
-                .is_none_or(|a| a.is_empty());
-            if empty_windows && empty_owned {
-                eprintln!("no KakaoTalk windows");
-                return 1;
-            }
-            let path = dump_dir.join(format!("window_dump_{}.json", file_stamp()));
-            if let Err(err) = write_json(&path, &payload) {
-                eprintln!("{err}");
-                return 1;
-            }
-            println!("{}", path.display());
-            return 0;
-        }
-        let mut frames = Vec::new();
-        let mut states = HashMap::new();
-        let deadline =
-            std::time::Instant::now() + Duration::from_millis(args.dump_series_duration_ms);
-        loop {
-            #[cfg(windows)]
-            let pids: Vec<i64> = kakao_win32::process::kakaotalk_pids().into_iter().collect();
-            let payload = dump_payload_with_states(api.as_ref(), &pids, &core, &rules, &mut states);
-            frames.push(payload);
-            if std::time::Instant::now() >= deadline {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(interval));
-        }
-        let series = serde_json::json!({
-            "timestamp": file_stamp(),
-            "duration_ms": args.dump_series_duration_ms,
-            "interval_ms": interval,
-            "frames": frames,
-        });
-        let path = dump_dir.join(format!("window_dump_series_{}.json", file_stamp()));
-        if let Err(err) = write_json(&path, &series) {
-            eprintln!("{err}");
-            return 1;
-        }
-        println!("{}", path.display());
-        return 0;
+        return dump_cmd::run_dump_commands(api.as_ref(), &pids, &core, &rules, &paths, &args);
     }
 
     let diagnostic = args.shadow && !args.apply;
@@ -206,7 +108,7 @@ pub fn run_with_args(args: Args) -> i32 {
                     // message box never appeared and a second double-click
                     // exited silently on the GUI-subsystem build.
                     if !should_attach_parent_console(std::env::args().skip(1)) {
-                        show_info_box(
+                        dialogs::show_info_box(
                             "KakaoTalk Layout AdBlocker",
                             "프로그램이 이미 실행 중입니다.",
                         );
@@ -236,33 +138,7 @@ pub fn run_with_args(args: Args) -> i32 {
         return 0;
     }
 
-    if settings.run_on_startup {
-        let expected = crate::startup::build_command();
-        let health = crate::startup::registration_health(
-            crate::startup::current_command().as_deref(),
-            &expected,
-        );
-        if crate::startup::should_repair_registration(health) {
-            if crate::startup::set_enabled(true) {
-                tracing::info!(
-                    "시작프로그램 등록을 현재 실행 파일로 복구했습니다. status={health}"
-                );
-            } else {
-                tracing::warn!(
-                    "시작프로그램 등록이 없거나 대상이 사라져 복구를 시도했으나 실패했습니다. status={health}"
-                );
-            }
-        } else if health == "custom" {
-            tracing::info!("시작프로그램에 사용자 지정 명령이 있어 자동 복구하지 않습니다.");
-        } else {
-            #[cfg(windows)]
-            if !kakao_win32::startup::ensure_startup_approved_enabled() {
-                tracing::warn!(
-                    "시작프로그램은 등록되어 있으나 Windows가 꺼 둔 시작 앱 상태를 켜지 못했습니다."
-                );
-            }
-        }
-    }
+    startup_repair::maybe_repair_startup_registration(&settings);
 
     let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
     info!("spawn_worker completed in main thread");
@@ -362,7 +238,10 @@ pub fn run_with_args(args: Args) -> i32 {
                 }
                 TrayCommand::CheckUpdate => {
                     if !updater::try_begin_update() {
-                        show_info_box("업데이트 확인", "업데이트 작업이 이미 진행 중입니다.");
+                        dialogs::show_info_box(
+                            "업데이트 확인",
+                            "업데이트 작업이 이미 진행 중입니다.",
+                        );
                         return;
                     }
                     let stopping = flags_for_tray.stopping.clone();
@@ -376,7 +255,7 @@ pub fn run_with_args(args: Args) -> i32 {
                                     "새 버전 v{}가 출시되었습니다.\n\n지금 업데이트를 다운로드하고 프로그램을 재시작하시겠습니까?",
                                     manifest.version
                                 );
-                                if !ask_yes_no("업데이트 확인", &msg) {
+                                if !dialogs::ask_yes_no("업데이트 확인", &msg) {
                                     updater::end_update();
                                     return;
                                 }
@@ -392,7 +271,7 @@ pub fn run_with_args(args: Args) -> i32 {
                                     Err(err) => {
                                         updater::end_update();
                                         error!(%err, "failed to prepare update");
-                                        show_error_box(
+                                        dialogs::show_error_box(
                                             "업데이트 실패",
                                             &format!(
                                                 "업데이트 적용 중 오류가 발생했습니다:\n{err}"
@@ -404,7 +283,7 @@ pub fn run_with_args(args: Args) -> i32 {
                             Err(updater::UpdateError::NoUpdate) => {
                                 updater::end_update();
                                 info!("already running latest version");
-                                show_info_box(
+                                dialogs::show_info_box(
                                     "업데이트 확인",
                                     &format!("현재 최신 버전(v{})을 사용 중입니다.", VERSION),
                                 );
@@ -412,7 +291,7 @@ pub fn run_with_args(args: Args) -> i32 {
                             Err(err) => {
                                 updater::end_update();
                                 tracing::warn!(%err, "update check failed");
-                                show_error_box(
+                                dialogs::show_error_box(
                                     "업데이트 확인 실패",
                                     &format!("업데이트 정보를 확인하지 못했습니다:\n{err}"),
                                 );
@@ -425,7 +304,7 @@ pub fn run_with_args(args: Args) -> i32 {
             {
                 let startup_trace = startup_trace.clone();
                 move || {
-                    write_startup_trace(
+                    observability::write_startup_trace(
                         startup_trace.as_deref(),
                         startup_launch,
                         minimized_requested,
@@ -437,7 +316,7 @@ pub fn run_with_args(args: Args) -> i32 {
         );
         if let Err(err) = tray_result {
             tracing::warn!("tray unavailable: {err}");
-            write_startup_trace(
+            observability::write_startup_trace(
                 startup_trace.as_deref(),
                 startup_launch,
                 minimized_requested,
@@ -500,142 +379,5 @@ pub fn run_with_args(args: Args) -> i32 {
         0
     } else {
         1
-    }
-}
-
-#[cfg(windows)]
-fn show_info_box(title: &str, text: &str) {
-    use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
-    unsafe {
-        let _ = MessageBoxW(
-            None,
-            &HSTRING::from(text),
-            &HSTRING::from(title),
-            MB_OK | MB_ICONINFORMATION,
-        );
-    }
-}
-
-#[cfg(windows)]
-fn show_error_box(title: &str, text: &str) {
-    use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
-    unsafe {
-        let _ = MessageBoxW(
-            None,
-            &HSTRING::from(text),
-            &HSTRING::from(title),
-            MB_OK | MB_ICONERROR,
-        );
-    }
-}
-
-#[cfg(windows)]
-fn ask_yes_no(title: &str, text: &str) -> bool {
-    use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_YESNO};
-    unsafe {
-        MessageBoxW(
-            None,
-            &HSTRING::from(text),
-            &HSTRING::from(title),
-            MB_YESNO | MB_ICONQUESTION,
-        ) == IDYES
-    }
-}
-
-fn write_startup_trace(
-    path: Option<&std::path::Path>,
-    startup_launch: bool,
-    minimized_requested: bool,
-    tray_available: bool,
-    tray_start_error: &str,
-) {
-    let Some(trace_path) = path else {
-        return;
-    };
-    let trace = serde_json::json!({
-        "startup_launch": startup_launch,
-        "minimized_requested": minimized_requested,
-        "shell_wait_attempted": true,
-        "shell_wait_ok": tray_available,
-        "tray_import_ok": tray_available,
-        "tray_available": tray_available,
-        "tray_start_error": tray_start_error,
-        "window_hidden_after_start": tray_available,
-    });
-    if let Some(parent) = trace_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(
-        trace_path,
-        serde_json::to_string_pretty(&trace).unwrap_or_default(),
-    );
-}
-
-fn init_tracing(log_path: Option<&std::path::Path>, log_level: &str) {
-    use tracing_subscriber::prelude::*;
-    let level = match log_level.to_ascii_uppercase().as_str() {
-        "TRACE" => tracing::Level::TRACE,
-        "DEBUG" => tracing::Level::DEBUG,
-        "WARN" | "WARNING" => tracing::Level::WARN,
-        "ERROR" => tracing::Level::ERROR,
-        _ => tracing::Level::INFO,
-    };
-    let env_filter = tracing_subscriber::EnvFilter::from_default_env().add_directive(level.into());
-
-    let fmt_layer = tracing_subscriber::fmt::layer();
-
-    if let Some(path) = log_path {
-        // RotatingLog keeps checking the size while the process runs; a plain
-        // append handle only ever got the one startup check.
-        if let Ok(rotating) = config::RotatingLog::open(path, config::LOG_ROTATE_BYTES) {
-            let file_layer = tracing_subscriber::fmt::layer()
-                .with_writer(rotating)
-                .with_ansi(false);
-            let _ = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(fmt_layer)
-                .with(file_layer)
-                .try_init();
-            return;
-        }
-    }
-
-    let _ = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(fmt_layer)
-        .try_init();
-}
-
-fn file_stamp() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_attach_parent_console;
-
-    #[test]
-    fn tray_launch_does_not_attach_console() {
-        assert!(!should_attach_parent_console(Vec::<&str>::new()));
-        assert!(!should_attach_parent_console(["--minimized"]));
-        assert!(!should_attach_parent_console([
-            "--startup-launch",
-            "--minimized"
-        ]));
-        assert!(!should_attach_parent_console(["--apply"]));
-    }
-
-    #[test]
-    fn diagnostic_cli_attaches_parent_console() {
-        assert!(should_attach_parent_console(["--self-check"]));
-        assert!(should_attach_parent_console(["--dump-tree"]));
-        assert!(should_attach_parent_console(["--shadow"]));
-        assert!(should_attach_parent_console(["--help"]));
     }
 }

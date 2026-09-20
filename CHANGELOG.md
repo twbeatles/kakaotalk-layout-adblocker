@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 구조
+- Rust 장문 파일 6개를 단일 책임 하위 모듈로 분할했습니다(`evaluate` 5개, `engine` 7개, `tray` 6개, `updater` 7개, `config` 4개 모듈 + `lib.rs`에서 `args`/`dialogs`/`observability`/`dump_cmd`/`startup_repair` 추출). 순수 코드 이동이며 광고 판정 알고리즘과 모든 공개 모듈 경로(`kakao_app::{Args, ...}`, `engine::{tick, ...}`, `tray::{...}` 등)는 그대로입니다. 기존 `.rs` 파일은 `pub use` 퍼사드로 유지됩니다.
+- `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --workspace`를 모두 통과했습니다.
+
 ## 11.1.4 - 2026-09-12
 
 `PROJECT_AUDIT.md`(2026-09-12) 감사에서 확인된 장기 상주 안정성 문제와 문서·설정 불일치를 수정한 릴리스입니다.

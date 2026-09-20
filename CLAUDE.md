@@ -34,9 +34,9 @@
 > Rust 기본 구현이 의도적으로 다르게 동작하는 지점은 다음과 같다. 혼동하지 말 것.
 
 - 설정/규칙 파손 백업 파일명은 Rust에서 `*.broken-<unix-epoch>`다. Python 계약의 `*.broken-YYYYMMDD-HHMMSS`가 아니다.
-- 트레이 상태는 v11.1.4부터 메뉴 헤더 + `NIF_TIP` 툴팁으로 노출한다(`kakao-win32/src/tray.rs`의 `status_menu_lines` / `status_tooltip`). 상태 값은 `SharedFlags`의 `main_windows`(확정 게이지), `hidden_windows`/`closed_windows`/`resized_windows`(누적), `restore_failures`(현재 실패 창 수 게이지), `last_error`에서 읽는다.
+- 트레이 상태는 v11.1.4부터 메뉴 헤더 + `NIF_TIP` 툴팁으로 노출한다(`kakao-win32/src/tray/status_text.rs`의 `status_menu_lines` / `status_tooltip`). 상태 값은 `SharedFlags`의 `main_windows`(확정 게이지), `hidden_windows`/`closed_windows`/`resized_windows`(누적), `restore_failures`(현재 실패 창 수 게이지), `last_error`에서 읽는다.
 - `EngineStatePayload.closed_windows`는 **empty `EVA_ChildWindow` close 요청 수**다. popup dismiss는 `popup_close_requests`가 따로 센다. 실제 창 소멸 확인은 순수 평가 계층이 알 수 없으므로 `SharedFlags.closed_windows`(엔진 계층)가 담당한다.
-- popup dismiss는 `WM_CLOSE` 결과로 분기하지 않고 hide/zero-size fallback을 항상 적용한다. 다만 소멸/거부/미전달 여부를 `DEBUG` 로그로 남긴다(`engine.rs` `apply_evaluation`). 매 tick 반복되는 경로라 `WARN`이 아니다.
+- popup dismiss는 `WM_CLOSE` 결과로 분기하지 않고 hide/zero-size fallback을 항상 적용한다. 다만 소멸/거부/미전달 여부를 `DEBUG` 로그로 남긴다(`engine/apply.rs` `apply_evaluation`). 매 tick 반복되는 경로라 `WARN`이 아니다.
 - 복원 실패는 지수 백오프로 재시도하고(`RESTORE_MAX_ATTEMPTS`, `RESTORE_GIVEUP_COOLDOWN_TICKS`) 창당 1회만 경고한다. `restore_failures`는 누적 시도 횟수가 아니라 현재 실패 중인 창 수다.
 - 로그 회전은 시작 시 1회가 아니라 `config::RotatingLog`가 기록 중에도 수행한다.
 - WinEvent 훅은 카카오톡 PID로 범위를 한정하며 PID 집합이 바뀌면 재설치한다(`EventHook::install_for_pids`).
@@ -60,7 +60,14 @@
 ## 핵심 모듈
 
 - 활성 런타임: `rust/crates/kakao-core`, `kakao-win32`, `kakao-app`, `kakao-updater`
-- 엔진 캐시(`snapshots`/`states`/`stale`)와 정리 시계는 `kakao-app/src/engine.rs`의 `EngineCaches`에 모여 있고 `tick(api, pids, settings, rules, caches, flags)`가 이를 받는다
+- 엔진 캐시(`snapshots`/`states`/`stale`)와 정리 시계는 `kakao-app/src/engine/caches.rs`의 `EngineCaches`에 모여 있고 `engine/tick.rs`의 `tick(api, pids, settings, rules, caches, flags)`가 이를 받는다
+- Rust 장문 파일은 단일 책임 하위 모듈로 분할되어 있다(순수 이동, 알고리즘·공개 경로 불변). 기존 `.rs` 파일은 `pub use` 퍼사드로 남는다:
+  - `kakao-core/src/evaluate/` — `payloads`(진단 DTO) / `mutation_log` / `inspect`(읽기전용 검사) / `apply`(변이 계획) / `orchestrate`(`evaluate_graph*` 진입점)
+  - `kakao-app/src/engine/` — `model`(스냅샷/상수) / `caches`(`EngineCaches`) / `flags`(`SharedFlags`) / `apply`(Win32 적용) / `restore`(복원·백오프) / `tick`(단일 조정 단계) / `worker`(백그라운드 루프)
+  - `kakao-win32/src/tray/` — `command` / `state` / `status_text`(Win32-free) / `shell_ready` / `host`(메시지 루프) / `menu`
+  - `kakao-app/src/updater/` — `error` / `model` / `version` / `canonical` / `manifest`(서명 검증) / `http` / `staging`
+  - `kakao-app/src/config/` — `paths` / `settings` / `storage`(self-heal I/O) / `log`(회전 라이터)
+  - `kakao-app/src/lib.rs`는 컴포지션 루트(`run_with_args`)로 남고 `args` / `dialogs` / `observability` / `dump_cmd` / `startup_repair`를 추출했다. `kakao_app::{Args, should_attach_parent_console}` 공개 경로는 유지된다
 - Python 참고 구현은 `legacy/python-v11/kakao_adblocker/` 아래에 있다. 아래 모듈 설명은 그 참고 구현의 알고리즘 계약이다.
 
 - `kakao_adblocker/app/`
