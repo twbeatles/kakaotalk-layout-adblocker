@@ -68,6 +68,7 @@
   - `kakao-app/src/updater/` — `error` / `model` / `version` / `canonical` / `manifest`(서명 검증) / `http` / `staging`
   - `kakao-app/src/config/` — `paths` / `settings` / `storage`(self-heal I/O) / `log`(회전 라이터)
   - `kakao-app/src/lib.rs`는 컴포지션 루트(`run_with_args`)로 남고 `args` / `dialogs` / `observability` / `dump_cmd` / `startup_repair`를 추출했다. `kakao_app::{Args, should_attach_parent_console}` 공개 경로는 유지된다
+  - 소스 grep 테스트(`tests/test_release_pipeline_v11.py`의 `read_rust_module`)는 퍼사드+분할 디렉터리 전체를 읽으므로 이후 분할에도 깨지지 않는다. 구조 이동 후에는 `cargo test`뿐 아니라 `pytest`까지 돌려야 한다(CI `validate` 잡이 Rust 소스를 직접 검사함)
 - Python 참고 구현은 `legacy/python-v11/kakao_adblocker/` 아래에 있다. 아래 모듈 설명은 그 참고 구현의 알고리즘 계약이다.
 
 - `kakao_adblocker/app/`

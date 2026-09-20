@@ -105,7 +105,7 @@ function Test-InteractiveShell {
 }
 
 function Test-VersionMetadata {
-    $pathsFile = Join-Path $repoRoot "rust\crates\kakao-app\src\config.rs"
+    $pathsFile = Join-Path $repoRoot "rust\crates\kakao-app\src\config\paths.rs"
     $versionInfoFile = Join-Path $repoRoot "packaging\windows_version_info.txt"
     $iconFile = Join-Path $repoRoot "packaging\app_icon.ico"
     $pathsText = Get-Content $pathsFile -Raw

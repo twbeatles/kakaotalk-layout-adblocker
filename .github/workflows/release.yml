@@ -28,7 +28,7 @@ jobs:
       - name: Verify tag matches application version
         shell: pwsh
         run: |
-          $version = (Select-String -Path rust/crates/kakao-app/src/config.rs -Pattern 'pub const VERSION: &str = "([^"]+)"').Matches[0].Groups[1].Value
+          $version = (Select-String -Path rust/crates/kakao-app/src/config/paths.rs -Pattern 'pub const VERSION: &str = "([^"]+)"').Matches[0].Groups[1].Value
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME must match application version v$version" }
       - name: Build release executable
         shell: pwsh

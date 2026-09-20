@@ -1,6 +1,22 @@
 from pathlib import Path
 
 
+def read_rust_module(path):
+    """Read a whole Rust module: facade file plus its split-directory files.
+
+    Long source files were split into single-responsibility submodules
+    (facade `.rs` + `<name>/` directory). Grep-based invariants must see the
+    entire module, not just the facade, so future splits keep passing.
+    """
+    base = Path(path)
+    texts = [base.read_text(encoding="utf-8")]
+    split_dir = base.with_suffix("")
+    if split_dir.is_dir():
+        for child in sorted(split_dir.glob("*.rs")):
+            texts.append(child.read_text(encoding="utf-8"))
+    return "\n".join(texts)
+
+
 def test_windows_ci_runs_packaged_self_check_in_release_build():
     workflow = Path(".github/workflows/windows-ci.yml").read_text(encoding="utf-8")
 
@@ -21,7 +37,7 @@ def test_startup_smoke_uses_bounded_wait_in_build_script():
 def test_release_workflow_reads_rust_version_and_toolchain():
     workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    assert "rust/crates/kakao-app/src/config.rs" in workflow
+    assert "rust/crates/kakao-app/src/config/paths.rs" in workflow
     assert "kakao_adblocker/config/paths.py" not in workflow
     assert "dtolnay/rust-toolchain@stable" in workflow
     assert "PYTHONPATH: legacy/python-v11" in workflow
@@ -30,7 +46,7 @@ def test_release_workflow_reads_rust_version_and_toolchain():
 def test_native_exe_is_windows_gui_and_embeds_app_icon():
     main = Path("rust/crates/kakao-app/src/main.rs").read_text(encoding="utf-8")
     build = Path("rust/crates/kakao-app/build.rs").read_text(encoding="utf-8")
-    tray = Path("rust/crates/kakao-win32/src/tray.rs").read_text(encoding="utf-8")
+    tray = read_rust_module("rust/crates/kakao-win32/src/tray.rs")
 
     assert 'windows_subsystem = "windows"' in main
     assert "HWND_MESSAGE" in tray
@@ -43,7 +59,7 @@ def test_native_exe_is_windows_gui_and_embeds_app_icon():
 
 def test_rust_holds_single_instance_mutex_and_resizes_with_nomove():
     app_lib = Path("rust/crates/kakao-app/src/lib.rs").read_text(encoding="utf-8")
-    engine = Path("rust/crates/kakao-app/src/engine.rs").read_text(encoding="utf-8")
+    engine = read_rust_module("rust/crates/kakao-app/src/engine.rs")
     mutex = Path("rust/crates/kakao-win32/src/single_instance.rs").read_text(encoding="utf-8")
 
     assert "let _instance_guard" in app_lib
