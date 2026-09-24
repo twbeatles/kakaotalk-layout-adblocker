@@ -20,5 +20,5 @@ pub use paths::{
     RuntimePaths, APPDATA_DIRNAME, LOG_FILE, RULES_FILE, SETTINGS_FILE, UPDATE_PUBLIC_KEY_B64,
     VERSION,
 };
-pub use settings::{load_settings, save_settings, AppSettings};
+pub use settings::{load_settings, save_settings, update_settings, AppSettings};
 pub use storage::{atomic_write, ensure_runtime_files, load_rules};

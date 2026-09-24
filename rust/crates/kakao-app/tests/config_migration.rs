@@ -181,3 +181,120 @@ fn typed_rules_null_and_bad_array_keep_defaults() {
     assert_eq!(rules.weak_signal_confirm_ticks, -1);
     let _ = fs::remove_dir_all(&temp_dir);
 }
+
+fn unique_temp_dir(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "kakao_{label}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn has_broken_backup(dir: &std::path::Path) -> bool {
+    fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains(".broken-"))
+}
+
+#[test]
+fn utf8_bom_settings_are_read_not_healed() {
+    // PROJECT_AUDIT 2026-09-24 ISSUE-001: a valid file saved with a UTF-8 BOM
+    // was treated as corrupt and overwritten with defaults.
+    let dir = unique_temp_dir("bom_settings");
+    let path = dir.join("layout_settings_v11.json");
+    let body = "\u{feff}{\"enabled\":true,\"aggressive_mode\":false,\"run_on_startup\":true}\n";
+    fs::write(&path, body).unwrap();
+
+    let (settings, warnings) = load_settings(&path);
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    assert!(!settings.aggressive_mode);
+    assert!(settings.run_on_startup);
+    assert!(!has_broken_backup(&dir));
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        body,
+        "file must be untouched"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn utf8_bom_rules_are_read_not_healed() {
+    let dir = unique_temp_dir("bom_rules");
+    let path = dir.join("layout_rules_v11.json");
+    fs::write(
+        &path,
+        "\u{feff}{\"banner_min_height_px\":55,\"aggressive_ad_tokens\":[\"광고\"]}",
+    )
+    .unwrap();
+
+    let (rules, warnings) = load_rules(&path);
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    assert_eq!(rules.banner_min_height_px, 55);
+    assert_eq!(rules.aggressive_ad_tokens, vec!["광고".to_string()]);
+    assert!(!has_broken_backup(&dir));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn utf8_bom_with_broken_json_still_heals() {
+    let dir = unique_temp_dir("bom_broken");
+    let path = dir.join("layout_settings_v11.json");
+    fs::write(&path, "\u{feff}{ not json").unwrap();
+
+    let (settings, warnings) = load_settings(&path);
+    assert_eq!(settings, AppSettings::default());
+    assert!(warnings.iter().any(|w| w.contains("손상 감지")));
+    assert!(has_broken_backup(&dir));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_settings_keeps_external_edits_and_changes_one_field() {
+    // PROJECT_AUDIT 2026-09-24 §5: tray toggles saved the startup-time copy
+    // and silently reverted values edited in the JSON while running.
+    let dir = unique_temp_dir("update_settings");
+    let path = dir.join("layout_settings_v11.json");
+    let startup_copy = AppSettings::default();
+    save_settings(&path, &startup_copy).unwrap();
+    let edited = AppSettings {
+        idle_poll_interval_ms: 350,
+        ..AppSettings::default()
+    };
+    save_settings(&path, &edited).unwrap();
+
+    let written = kakao_app::config::update_settings(&path, &startup_copy, |s| {
+        s.aggressive_mode = false;
+    })
+    .unwrap();
+    assert_eq!(
+        written.idle_poll_interval_ms, 350,
+        "external edit must survive"
+    );
+    assert!(!written.aggressive_mode);
+    let (reloaded, _) = load_settings(&path);
+    assert_eq!(reloaded, written);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_settings_uses_fallback_when_the_file_is_unreadable() {
+    let dir = unique_temp_dir("update_settings_broken");
+    let path = dir.join("layout_settings_v11.json");
+    fs::write(&path, "{ broken").unwrap();
+    let fallback = AppSettings {
+        idle_poll_interval_ms: 777,
+        ..AppSettings::default()
+    };
+    let written =
+        kakao_app::config::update_settings(&path, &fallback, |s| s.enabled = false).unwrap();
+    assert_eq!(written.idle_poll_interval_ms, 777);
+    assert!(!written.enabled);
+    let _ = fs::remove_dir_all(&dir);
+}

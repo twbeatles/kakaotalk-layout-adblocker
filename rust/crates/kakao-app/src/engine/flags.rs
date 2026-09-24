@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::config::AppSettings;
@@ -22,6 +22,9 @@ pub struct SharedFlags {
     pub resized_windows: Arc<AtomicU32>,
     /// Most recent engine-level error, surfaced in the tray status.
     pub last_error: Arc<Mutex<String>>,
+    /// Whether `last_error` currently holds a restore failure, so it can be
+    /// cleared once restores recover without wiping an unrelated message.
+    restore_error_active: AtomicBool,
 }
 
 impl SharedFlags {
@@ -39,6 +42,7 @@ impl SharedFlags {
             closed_windows: Arc::new(AtomicU32::new(0)),
             resized_windows: Arc::new(AtomicU32::new(0)),
             last_error: Arc::new(Mutex::new(String::new())),
+            restore_error_active: AtomicBool::new(false),
         })
     }
 
@@ -47,6 +51,32 @@ impl SharedFlags {
             guard.clear();
             guard.push_str(message);
         }
+        self.restore_error_active.store(false, Ordering::SeqCst);
+    }
+
+    /// Record a restore failure as the current error.
+    pub fn set_restore_error(&self, message: &str) {
+        self.set_last_error(message);
+        self.restore_error_active.store(true, Ordering::SeqCst);
+    }
+
+    /// Clear `last_error` only if it still describes a restore failure.
+    pub fn clear_restore_error(&self) {
+        if self.restore_error_active.swap(false, Ordering::SeqCst) {
+            if let Ok(mut guard) = self.last_error.lock() {
+                guard.clear();
+            }
+        }
+    }
+
+    /// Publish the restore-failure gauge and keep `last_error` in step with it.
+    pub fn report_restore_failures(&self, failures: u32, err: &str) {
+        self.restore_failures.store(failures, Ordering::SeqCst);
+        if failures == 0 {
+            self.clear_restore_error();
+        } else if !err.is_empty() {
+            self.set_restore_error(err);
+        }
     }
 
     pub fn last_error_text(&self) -> String {
@@ -54,5 +84,32 @@ impl SharedFlags {
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flags() -> Arc<SharedFlags> {
+        SharedFlags::from_settings(&AppSettings::default(), true)
+    }
+
+    #[test]
+    fn recovered_restore_clears_its_own_error() {
+        let flags = flags();
+        flags.report_restore_failures(1, "restore show failed hwnd=1");
+        assert_eq!(flags.last_error_text(), "restore show failed hwnd=1");
+        flags.report_restore_failures(0, "");
+        assert_eq!(flags.last_error_text(), "");
+    }
+
+    #[test]
+    fn restore_recovery_keeps_an_unrelated_error() {
+        let flags = flags();
+        flags.report_restore_failures(1, "restore show failed hwnd=1");
+        flags.set_last_error("설정 자동 복구");
+        flags.report_restore_failures(0, "");
+        assert_eq!(flags.last_error_text(), "설정 자동 복구");
     }
 }

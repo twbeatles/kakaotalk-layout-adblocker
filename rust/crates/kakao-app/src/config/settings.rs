@@ -18,6 +18,11 @@ pub struct AppSettings {
     pub poll_interval_ms: u32,
     #[serde(default = "default_idle_poll")]
     pub idle_poll_interval_ms: u32,
+    /// Upper bound for the idle reconciliation interval once KakaoTalk has
+    /// produced no window events for a while. `<= idle_poll_interval_ms`
+    /// disables the backoff.
+    #[serde(default = "default_idle_backoff_max")]
+    pub idle_backoff_max_ms: u32,
     #[serde(default = "default_pid_scan")]
     pub pid_scan_interval_ms: u32,
     #[serde(default = "default_cache_cleanup")]
@@ -55,6 +60,9 @@ fn default_poll() -> u32 {
 }
 fn default_idle_poll() -> u32 {
     200
+}
+fn default_idle_backoff_max() -> u32 {
+    1000
 }
 fn default_pid_scan() -> u32 {
     200
@@ -125,6 +133,27 @@ fn merge_typed_settings(
         }
     }
     (result, warnings)
+}
+
+/// Read-modify-write for tray toggles: apply `change` to the settings
+/// currently on disk rather than to the copy loaded at startup, so values the
+/// user edited in the JSON while the app was running are not overwritten.
+/// Falls back to `fallback` when the file cannot be read cleanly. Returns the
+/// settings that were written.
+pub fn update_settings(
+    path: &Path,
+    fallback: &AppSettings,
+    change: impl FnOnce(&mut AppSettings),
+) -> std::io::Result<AppSettings> {
+    let (on_disk, warnings) = load_settings(path);
+    let mut next = if warnings.is_empty() && path.is_file() {
+        on_disk
+    } else {
+        fallback.clone()
+    };
+    change(&mut next);
+    save_settings(path, &next)?;
+    Ok(next)
 }
 
 pub fn save_settings(path: &Path, settings: &AppSettings) -> std::io::Result<()> {

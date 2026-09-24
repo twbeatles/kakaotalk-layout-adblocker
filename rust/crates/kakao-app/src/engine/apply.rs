@@ -22,6 +22,26 @@ pub fn capture_snapshot(
     })
 }
 
+/// Keep the first snapshot of a window. Hidden ads are re-hidden every tick,
+/// and capturing again (IsWindowVisible + GetWindowRect per window per tick)
+/// only to discard the result was pure overhead.
+fn remember_snapshot(
+    api: &dyn Win32Api,
+    graph: &WindowGraph,
+    hwnd: i64,
+    snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+) {
+    let Some(node) = graph.get(hwnd) else {
+        return;
+    };
+    if snapshots.contains_key(&node.identity()) {
+        return;
+    }
+    if let Some(snap) = capture_snapshot(api, graph, hwnd) {
+        snapshots.insert(snap.identity.clone(), snap);
+    }
+}
+
 pub(super) fn identity_matches(api: &dyn Win32Api, identity: &WindowIdentity) -> bool {
     api.is_window(identity.hwnd)
         && api.get_window_thread_process_id(identity.hwnd) == identity.pid
@@ -52,7 +72,9 @@ pub fn apply_evaluation(
         if !pids.contains(&node.pid) {
             return false;
         }
-        identity_matches(api, &node.identity())
+        // A not-responding KakaoTalk thread would block the synchronous
+        // ShowWindow/SetWindowPos below; skip it and re-evaluate next tick.
+        identity_matches(api, &node.identity()) && !api.is_hung_app_window(hwnd)
     };
 
     for hwnd in &evaluation.actions.close {
@@ -84,9 +106,7 @@ pub fn apply_evaluation(
         if !precheck(*hwnd) {
             continue;
         }
-        if let Some(snap) = capture_snapshot(api, graph, *hwnd) {
-            snapshots.entry(snap.identity.clone()).or_insert(snap);
-        }
+        remember_snapshot(api, graph, *hwnd, snapshots);
         // ShowWindow returns non-zero only when the window was previously
         // visible, so this counts newly hidden windows rather than the
         // per-tick re-application on an already hidden one.
@@ -112,9 +132,7 @@ pub fn apply_evaluation(
         // SetWindowPos treats screen coordinates as parent-relative, which
         // shoves the main view off-canvas and blacks out KakaoTalk.
         if !is_view_resize {
-            if let Some(snap) = capture_snapshot(api, graph, hwnd) {
-                snapshots.entry(snap.identity.clone()).or_insert(snap);
-            }
+            remember_snapshot(api, graph, hwnd, snapshots);
         }
         let mut swp_flags = SWP_NOZORDER | SWP_NOACTIVATE;
         if is_view_resize {

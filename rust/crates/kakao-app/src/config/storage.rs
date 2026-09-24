@@ -37,19 +37,24 @@ pub(super) fn load_json_value(path: &Path, label: &str) -> (Value, Vec<String>) 
         return (Value::Object(Default::default()), warnings);
     }
     match fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str::<Value>(&text) {
-            Ok(Value::Object(map)) => (Value::Object(map), warnings),
-            Ok(_) => {
-                backup_broken(path, label, "최상위 타입이 object가 아님", &mut warnings);
-                heal_default(path, label, &mut warnings);
-                (Value::Object(Default::default()), warnings)
+        // Windows PowerShell 5.1 `Set-Content -Encoding utf8` and Notepad's
+        // "UTF-8 (BOM)" prepend U+FEFF, which serde_json rejects. Without this
+        // a hand-edited but valid file was "healed" back to defaults.
+        Ok(text) => {
+            match serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
+                Ok(Value::Object(map)) => (Value::Object(map), warnings),
+                Ok(_) => {
+                    backup_broken(path, label, "최상위 타입이 object가 아님", &mut warnings);
+                    heal_default(path, label, &mut warnings);
+                    (Value::Object(Default::default()), warnings)
+                }
+                Err(_) => {
+                    backup_broken(path, label, "JSON 파싱 실패", &mut warnings);
+                    heal_default(path, label, &mut warnings);
+                    (Value::Object(Default::default()), warnings)
+                }
             }
-            Err(_) => {
-                backup_broken(path, label, "JSON 파싱 실패", &mut warnings);
-                heal_default(path, label, &mut warnings);
-                (Value::Object(Default::default()), warnings)
-            }
-        },
+        }
         Err(err) => {
             warnings.push(format!("{label} 읽기 실패: {err}"));
             (Value::Object(Default::default()), warnings)
@@ -104,7 +109,10 @@ pub fn atomic_write(path: &Path, text: &str) -> io::Result<()> {
     let write_result = (|| -> io::Result<()> {
         let mut file = fs::File::create(&tmp)?;
         file.write_all(text.as_bytes())?;
-        file.flush()?;
+        // flush() only reaches the OS cache; without sync_all a power loss
+        // right after the rename can leave an empty file that self-heals to
+        // defaults on the next launch.
+        file.sync_all()?;
         Ok(())
     })();
     if let Err(err) = write_result {

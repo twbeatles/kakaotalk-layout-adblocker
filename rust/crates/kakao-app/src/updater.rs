@@ -27,7 +27,8 @@ pub use model::{
     RELEASE_DOWNLOAD_PREFIX, USER_AGENT,
 };
 pub use staging::{
-    apply_update, end_update, launch_helper, prepare_update, relaunch_args_from, resolve_helper,
-    stage_helper, try_begin_update, unique_staging_path, unix_now, update_in_progress,
+    apply_update, discard_staged, end_update, launch_helper, prepare_update, relaunch_args_from,
+    resolve_helper, stage_helper, try_begin_update, unique_staging_path, unix_now,
+    update_in_progress,
 };
 pub use version::{is_newer, version_tuple};

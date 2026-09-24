@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use kakao_core::{Rect, WindowText};
@@ -47,10 +48,16 @@ struct Inner {
     fail_set_pos: HashSet<i64>,
     fail_show: HashSet<i64>,
     restore_attempts: HashMap<i64, u64>,
+    hung: HashSet<i64>,
+    ancestor_visibility: bool,
+    rect_queries: HashMap<i64, u64>,
 }
 
 pub struct FakeWin32 {
     inner: Mutex<Inner>,
+    /// Lets tests exercise the worker's panic guard. Checked before the inner
+    /// lock is taken so a deliberate panic cannot poison it.
+    panic_on_enum_windows: AtomicBool,
 }
 
 impl FakeWin32 {
@@ -65,12 +72,16 @@ impl FakeWin32 {
             fail_set_pos: HashSet::new(),
             fail_show: HashSet::new(),
             restore_attempts: HashMap::new(),
+            hung: HashSet::new(),
+            ancestor_visibility: false,
+            rect_queries: HashMap::new(),
         };
         for node in dump.windows {
             load_node(&mut inner, node, 0);
         }
         Ok(Self {
             inner: Mutex::new(inner),
+            panic_on_enum_windows: AtomicBool::new(false),
         })
     }
 
@@ -136,6 +147,42 @@ impl FakeWin32 {
         });
     }
 
+    pub fn set_panic_on_enum_windows(&self, enabled: bool) {
+        self.panic_on_enum_windows.store(enabled, Ordering::SeqCst);
+    }
+
+    /// Mark a window as belonging to a hung (not responding) thread.
+    pub fn set_hung(&self, hwnd: i64, hung: bool) {
+        self.with(|inner| {
+            if hung {
+                inner.hung.insert(hwnd);
+            } else {
+                inner.hung.remove(&hwnd);
+            }
+        });
+    }
+
+    /// Opt in to real `IsWindowVisible` semantics (a window counts as visible
+    /// only when every ancestor is visible too). Off by default so existing
+    /// fixtures keep their recorded per-node visibility.
+    pub fn set_ancestor_visibility(&self, enabled: bool) {
+        self.with(|inner| inner.ancestor_visibility = enabled);
+    }
+
+    /// Force a window's own visibility flag, bypassing `show_window`.
+    pub fn set_visible(&self, hwnd: i64, visible: bool) {
+        self.with(|inner| {
+            if let Some(rec) = inner.windows.get_mut(&hwnd) {
+                rec.visible = visible;
+            }
+        });
+    }
+
+    /// How many times `get_window_rect` was called for this window.
+    pub fn rect_queries(&self, hwnd: i64) -> u64 {
+        self.with(|inner| inner.rect_queries.get(&hwnd).copied().unwrap_or(0))
+    }
+
     fn with<R>(&self, f: impl FnOnce(&mut Inner) -> R) -> R {
         let mut inner = self.inner.lock().expect("fake lock");
         f(&mut inner)
@@ -181,6 +228,10 @@ fn load_node(inner: &mut Inner, node: DumpNode, parent: i64) {
 
 impl Win32Api for FakeWin32 {
     fn enum_windows(&self, cb: &mut dyn FnMut(i64) -> bool) -> bool {
+        assert!(
+            !self.panic_on_enum_windows.load(Ordering::SeqCst),
+            "FakeWin32: injected enum_windows panic"
+        );
         let hwnds = self.with(|inner| {
             let mut hwnds: Vec<i64> = inner
                 .windows
@@ -208,6 +259,16 @@ impl Win32Api for FakeWin32 {
             }
         });
         for hwnd in children {
+            if !cb(hwnd) {
+                break;
+            }
+        }
+        true
+    }
+
+    fn enum_descendant_windows(&self, parent: i64, cb: &mut dyn FnMut(i64) -> bool) -> bool {
+        let descendants = self.with(|inner| collect_descendants(inner, parent));
+        for hwnd in descendants {
             if !cb(hwnd) {
                 break;
             }
@@ -253,7 +314,10 @@ impl Win32Api for FakeWin32 {
     }
 
     fn get_window_rect(&self, hwnd: i64) -> Option<Rect> {
-        self.with(|inner| inner.windows.get(&hwnd).and_then(|rec| rec.rect))
+        self.with(|inner| {
+            *inner.rect_queries.entry(hwnd).or_insert(0) += 1;
+            inner.windows.get(&hwnd).and_then(|rec| rec.rect)
+        })
     }
 
     fn get_client_rect(&self, hwnd: i64) -> Option<Rect> {
@@ -271,12 +335,34 @@ impl Win32Api for FakeWin32 {
 
     fn is_window_visible(&self, hwnd: i64) -> bool {
         self.with(|inner| {
+            let mut current = hwnd;
+            loop {
+                let Some(rec) = inner.windows.get(&current) else {
+                    return false;
+                };
+                if !rec.visible {
+                    return false;
+                }
+                if !inner.ancestor_visibility || rec.parent == 0 {
+                    return true;
+                }
+                current = rec.parent;
+            }
+        })
+    }
+
+    fn has_visible_style(&self, hwnd: i64) -> bool {
+        self.with(|inner| {
             inner
                 .windows
                 .get(&hwnd)
                 .map(|rec| rec.visible)
                 .unwrap_or(false)
         })
+    }
+
+    fn is_hung_app_window(&self, hwnd: i64) -> bool {
+        self.with(|inner| inner.hung.contains(&hwnd))
     }
 
     fn show_window(&self, hwnd: i64, cmd: i32) -> bool {

@@ -63,10 +63,7 @@ pub fn tick(
         if !caches.snapshots.is_empty() {
             let matched = matched_identities(&graph, &evaluation);
             let (failures, err) = restore_stale_hidden(api, caches, &matched);
-            flags.restore_failures.store(failures, Ordering::SeqCst);
-            if failures > 0 && !err.is_empty() {
-                flags.set_last_error(&err);
-            }
+            flags.report_restore_failures(failures, &err);
         }
     } else {
         for candidate in &evaluation.candidates {

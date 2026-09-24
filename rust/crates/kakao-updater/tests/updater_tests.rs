@@ -85,3 +85,38 @@ fn missing_current_returns_error() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn failed_update_relaunches_previous_except_on_wait_timeout() {
+    // PROJECT_AUDIT 2026-09-24 §5: a failed swap left no ad blocker running.
+    use kakao_updater::should_relaunch_previous;
+    assert!(should_relaunch_previous(&HelperError::BackupFailed(
+        "denied".into()
+    )));
+    assert!(should_relaunch_previous(&HelperError::ReplaceFailed(
+        "denied".into()
+    )));
+    assert!(should_relaunch_previous(
+        &HelperError::ReplacementHashMismatch("x".into())
+    ));
+    assert!(
+        !should_relaunch_previous(&HelperError::WaitTimeout(42)),
+        "the app is still running after a wait timeout"
+    );
+}
+
+#[test]
+fn relaunch_previous_needs_an_existing_file_and_discard_removes_staging() {
+    use kakao_updater::{discard_replacement, relaunch_previous};
+    let dir = std::env::temp_dir().join(format!("kakao_updater_discard_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    assert!(!relaunch_previous(&dir.join("missing.exe"), &[]));
+
+    let staged = dir.join("staged.exe");
+    fs::write(&staged, b"MZ").unwrap();
+    discard_replacement(&staged);
+    assert!(!staged.exists());
+    discard_replacement(&staged); // idempotent
+    let _ = fs::remove_dir_all(&dir);
+}

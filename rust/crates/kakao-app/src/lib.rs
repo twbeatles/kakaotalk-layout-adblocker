@@ -20,6 +20,9 @@ use std::time::Duration;
 use tracing::{error, info};
 
 use config::{ensure_runtime_files, load_rules, load_settings, runtime_paths};
+
+/// How long shutdown waits for the engine worker to restore windows and exit.
+const WORKER_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 use engine::{spawn_worker, tick, EngineCaches, SharedFlags};
 
 pub fn run_with_args(args: Args) -> i32 {
@@ -63,11 +66,12 @@ pub fn run_with_args(args: Args) -> i32 {
     let (mut settings, warnings) = load_settings(&paths.settings_file);
     let (rules, rule_warnings) = load_rules(&paths.rules_file);
     observability::init_tracing(Some(&paths.log_file), &settings.log_level);
-    for warning in bootstrap_warnings
+    let startup_warnings: Vec<String> = bootstrap_warnings
         .into_iter()
         .chain(warnings)
         .chain(rule_warnings)
-    {
+        .collect();
+    for warning in &startup_warnings {
         tracing::warn!("{warning}");
     }
     if args.startup_launch || args.minimized {
@@ -138,6 +142,26 @@ pub fn run_with_args(args: Args) -> i32 {
         return 0;
     }
 
+    // A self-healed settings file used to be visible only in the log.
+    if let Some(summary) = observability::startup_warning_summary(&startup_warnings) {
+        flags.set_last_error(&summary);
+    }
+    if startup_repair::adopt_registry_startup_state(
+        &mut settings,
+        startup::current_command().as_deref(),
+    ) {
+        flags
+            .startup
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        match config::update_settings(&paths.settings_file, &settings, |s| {
+            s.run_on_startup = true;
+        }) {
+            Ok(_) => info!("run_on_startup synced to the existing Run registration"),
+            Err(err) => {
+                tracing::warn!(%err, "failed to save run_on_startup synced from the registry")
+            }
+        }
+    }
     startup_repair::maybe_repair_startup_registration(&settings);
 
     let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
@@ -169,7 +193,7 @@ pub fn run_with_args(args: Args) -> i32 {
 
         use kakao_win32::tray::{TrayCommand, TrayFlags, TrayStatus};
 
-        use crate::config::{save_settings, VERSION};
+        use crate::config::{update_settings, VERSION};
 
         let flags_for_tray = flags.clone();
         let settings_path = paths.settings_file.clone();
@@ -191,36 +215,46 @@ pub fn run_with_args(args: Args) -> i32 {
                 last_error: flags.last_error.clone(),
             },
             move |command| match command {
+                // Toggles re-read the file and change one field (update_settings)
+                // so JSON edits made while running are not reverted.
                 TrayCommand::ToggleEnabled => {
                     let next = !flags_for_tray.enabled.load(Ordering::SeqCst);
-                    settings.enabled = next;
-                    if let Err(err) = save_settings(&settings_path, &settings) {
-                        tracing::warn!(%err, "failed to save settings, rolling back enabled toggle");
-                        settings.enabled = !next;
-                    } else {
-                        flags_for_tray.enabled.store(next, Ordering::SeqCst);
+                    match update_settings(&settings_path, &settings, |s| s.enabled = next) {
+                        Ok(written) => {
+                            settings = written;
+                            flags_for_tray.enabled.store(next, Ordering::SeqCst);
+                        }
+                        Err(err) => {
+                            tracing::warn!(%err, "failed to save settings, rolling back enabled toggle");
+                        }
                     }
                 }
                 TrayCommand::ToggleAggressive => {
                     let next = !flags_for_tray.aggressive.load(Ordering::SeqCst);
-                    settings.aggressive_mode = next;
-                    if let Err(err) = save_settings(&settings_path, &settings) {
-                        tracing::warn!(%err, "failed to save settings, rolling back aggressive toggle");
-                        settings.aggressive_mode = !next;
-                    } else {
-                        flags_for_tray.aggressive.store(next, Ordering::SeqCst);
+                    match update_settings(&settings_path, &settings, |s| s.aggressive_mode = next) {
+                        Ok(written) => {
+                            settings = written;
+                            flags_for_tray.aggressive.store(next, Ordering::SeqCst);
+                        }
+                        Err(err) => {
+                            tracing::warn!(%err, "failed to save settings, rolling back aggressive toggle");
+                        }
                     }
                 }
                 TrayCommand::ToggleStartup => {
                     let next = !flags_for_tray.startup.load(Ordering::SeqCst);
                     if crate::startup::set_enabled(next) {
-                        settings.run_on_startup = next;
-                        if let Err(err) = save_settings(&settings_path, &settings) {
-                            tracing::warn!(%err, "failed to save settings, rolling back startup toggle");
-                            settings.run_on_startup = !next;
-                            let _ = crate::startup::set_enabled(!next);
-                        } else {
-                            flags_for_tray.startup.store(next, Ordering::SeqCst);
+                        match update_settings(&settings_path, &settings, |s| {
+                            s.run_on_startup = next
+                        }) {
+                            Ok(written) => {
+                                settings = written;
+                                flags_for_tray.startup.store(next, Ordering::SeqCst);
+                            }
+                            Err(err) => {
+                                tracing::warn!(%err, "failed to save settings, rolling back startup toggle");
+                                let _ = crate::startup::set_enabled(!next);
+                            }
                         }
                     }
                 }
@@ -327,14 +361,12 @@ pub fn run_with_args(args: Args) -> i32 {
                 .stopping
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             info!("tray unavailable, stopping worker then exiting");
-            let join_code = match worker.join() {
-                Ok(_) => 1,
-                Err(_) => {
-                    error!("engine worker panic");
-                    1
-                }
-            };
-            return join_code;
+            match engine::join_with_timeout(worker, WORKER_STOP_TIMEOUT) {
+                Some(Err(_)) => error!("engine worker panic"),
+                None => tracing::warn!("engine worker did not stop in time; exiting anyway"),
+                Some(Ok(_)) => {}
+            }
+            return 1;
         }
     }
     #[cfg(not(windows))]
@@ -350,10 +382,21 @@ pub fn run_with_args(args: Args) -> i32 {
     flags
         .stopping
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let join_ok = match worker.join() {
-        Ok(_) => true,
-        Err(_) => {
+    // Bounded: restoring windows calls ShowWindow/SetWindowPos synchronously on
+    // KakaoTalk's windows, which can block while KakaoTalk is not responding.
+    // Waiting forever kept an invisible process holding the single-instance
+    // mutex; exiting the process ends the stuck thread instead.
+    let join_ok = match engine::join_with_timeout(worker, WORKER_STOP_TIMEOUT) {
+        Some(Ok(_)) => true,
+        Some(Err(_)) => {
             error!("engine worker panic");
+            false
+        }
+        None => {
+            tracing::warn!(
+                timeout_ms = WORKER_STOP_TIMEOUT.as_millis() as u64,
+                "engine worker did not stop in time (KakaoTalk may not be responding); exiting without it"
+            );
             false
         }
     };
@@ -369,6 +412,7 @@ pub fn run_with_args(args: Args) -> i32 {
                 return if join_ok { 0 } else { 1 };
             }
             Err(err) => {
+                updater::discard_staged(&staged);
                 updater::end_update();
                 error!(%err, "failed to launch update helper after restore");
                 return 1;

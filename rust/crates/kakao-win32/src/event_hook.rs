@@ -132,6 +132,21 @@ impl EventHook {
         events
     }
 
+    /// Keep pumping messages for `duration`. WinEvent callbacks only run
+    /// while this thread pumps, so a plain `thread::sleep` here would leave
+    /// the events of a burst queued until the next wait and trigger a second
+    /// reconciliation instead of coalescing into this one.
+    pub fn pump_for(&self, duration: Duration) {
+        let deadline = std::time::Instant::now() + duration;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            self.wait_message(remaining);
+        }
+    }
+
     pub fn wait_message(&self, timeout: Duration) {
         unsafe {
             MsgWaitForMultipleObjects(None, false, timeout.as_millis() as u32, QS_ALLINPUT);

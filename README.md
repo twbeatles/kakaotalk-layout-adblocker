@@ -3,17 +3,16 @@
 > **관리자 권한(UAC)·시스템 변조·hosts 수정 없이, 순수 Win32 레이아웃 제어로 동작하는 초경량 카카오톡 광고 차단기**
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.4-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.5-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
-[![RAM Usage](https://img.shields.io/badge/RAM-~5MB-blue)]()
-[![CPU Usage](https://img.shields.io/badge/CPU-0.01%25%20(Idle)-brightgreen)]()
+[![Idle CPU](https://img.shields.io/badge/Idle%20CPU-~0.16%25%20of%201%20core-brightgreen)](BENCHMARK.md)
 
 **Windows PC용 카카오톡 레이아웃 기반 무해한 광고 차단기**입니다.
 
 기존의 번거롭고 시스템에 위험을 주는 광고 차단 방식(`hosts` 파일 수정, DNS 캐시 변조, AdFit 레지스트리 조작, 패킷 감청, 타 프로세스 메모리 패치)을 **전혀 사용하지 않습니다.** 순수 **Windows 표준 Win32 API를 통한 윈도우 레이아웃 재계산 및 광고 창 은닉**만으로 동작하여 카카오톡의 모든 정상 기능(채팅, 파일 전송, 선물하기, 페이 등)과 시스템 환경을 완벽하게 보호합니다.
 
-순수 Rust 네이티브(`kakao-adblock-rs`)로 컴파일되어 **메모리 약 4~7MB, 유휴 CPU 0.01%대**의 압도적인 초경량·초저지연 성능을 제공하며, **관리자 권한(UAC)이 필요 없어 회사 업무용 PC에서도 안심하고 사용**할 수 있습니다.
+순수 Rust 네이티브(`kakao-adblock-rs`)로 동작하며, 카카오톡이 켜진 유휴 상태에서 **CPU 코어 1개 기준 약 0.16%(8코어 PC 전체 기준 약 0.02%)** 만 사용합니다([측정 조건](BENCHMARK.md)). **관리자 권한(UAC)이 필요 없어 회사 업무용 PC에서도 안심하고 사용**할 수 있습니다.
 
 ---
 
@@ -62,17 +61,18 @@
 ├───────────────────┬────────────────────────────┬───────────────────────┤
 │  1. Layout-Only   │       2. Rust Native       │     3. Zero-Admin     │
 │  순수 레이아웃 제어 │       초경량·초저전력      │     관리자 권한 불필요 │
-│  hosts/DNS 변조 0% │  RAM 4~7MB / CPU 0.01%대   │  사내 업무용 PC 완벽대응 │
+│  hosts/DNS 변조 0% │ 유휴 CPU ~0.16%(코어 1개)  │  사내 업무용 PC 완벽대응 │
 └───────────────────┴────────────────────────────┴───────────────────────┘
 ```
 
 - 🛡️ **안전한 순수 레이아웃 제어 (Layout-Only)**
   - `hosts` 파일 변조, DNS 캐시 조작, 프록시 설정, 패킷 가로채기를 **일체 하지 않습니다.**
   - 카카오톡 내부 메모리 코드를 후킹하거나 바이너리를 패치하지 않으므로 백신 오탐이나 카톡 계정 제재의 위험이 원천 차단됩니다.
-- ⚡ **Rust 네이티브 초경량 & 초저지연 성능 (유휴 CPU 0.01%대)**
+- ⚡ **Rust 네이티브 저부하 성능**
   - Python 등 무거운 인터프리터 런타임 없이 C/Rust 수준의 순수 Win32 네이티브 바이너리로 구동됩니다.
-  - 상시 상주 메모리(Working Set) **4MB ~ 7MB**, 유휴 상태 CPU 점유율 **0.01% 미만**으로 노트북 배터리와 시스템 자원을 거의 소모하지 않습니다.
-  - `SetWinEventHook` 커널 이벤트 감지를 통해 창 생성 시 **5ms 이내**로 즉각 반응하여 광고 깜빡임 없이 처리합니다.
+  - 카카오톡이 켜진 유휴 상태에서 CPU 코어 1개 기준 약 0.16%를 사용합니다. 카카오톡 창 이벤트가 없으면 재확인 주기를 최대 1초까지 늘리고, 카카오톡이 꺼져 있으면 프로세스 탐색 간격을 최대 2초까지 늘립니다.
+  - `SetWinEventHook`으로 카카오톡 창 생성/표시 이벤트를 받아, 짧은 이벤트 묶음 대기(기본 20ms) 뒤 바로 처리합니다.
+  - 측정값은 [BENCHMARK.md](BENCHMARK.md)에 측정 환경과 함께 정리되어 있습니다.
 - 🏢 **무권한(Non-UAC) 구동 — 회사 업무용 PC 완벽 지원**
   - 관리자 계정 권한(UAC) 없이 100% 일반 사용자 권한으로 동작합니다.
   - 보안 통제가 엄격한 회사 컴퓨터나 공용 PC에서도 사내 보안 규정을 위반하지 않고 안전하게 사용할 수 있습니다.
@@ -95,8 +95,7 @@
 | **카카오톡 기능 영향** | 선물하기/페이/이모티콘 오류 발생 | 카톡 업데이트 시 크래시 | 비정상 클릭 발생 가능 | **모든 정상 기능 100% 완벽 작동** |
 | **하단 빈 여백 처리** | 흰색/회색 빈 공간 그대로 방치 | 처리 불가 | 여백 남음 | **메인 뷰가 하단 끝까지 깔끔하게 채워짐** |
 | **팝업 광고(AdFit) 처리** | 도메인 단위 불완전 차단 | 강제 프로세스 킬 | 대응 어려움 | **`SendMessageTimeoutW` 안전 닫기** |
-| **상주 메모리 (RAM)** | 20MB ~ 50MB | 10MB ~ 30MB | 30MB ~ 80MB (Python/Node) | **3MB ~ 7MB (초경량 Rust 네이티브)** |
-| **유휴 CPU 점유율** | 상시 수 % | 낮음 | 0.5% ~ 2.0% | **0.01% 미만 (사실상 0%)** |
+| **유휴 CPU 점유율** | 상시 수 % | 낮음 | 0.5% ~ 2.0% | **코어 1개 기준 약 0.16% ([측정](BENCHMARK.md))** |
 | **원클릭 원상 복구** | hosts 수동 복원 필요 | 재부팅 필요 | 창 좌표 깨짐 | **트레이 원클릭 즉시 100% 원복** |
 | **회사/사내 PC 사용** | 불가 (보안 규정 위반) | 불가 (악성코드 오탐) | 불안정 | **완벽 대응 (보안 솔루션 무간섭)** |
 
@@ -109,8 +108,8 @@
 ```mermaid
 flowchart TD
     subgraph Detection["1. 실시간 이벤트 감지 계층"]
-        A[카카오톡 실행 및 창 생성] -->|SetWinEventHook| B(OS 커널 이벤트 수신 < 5ms)
-        C[적응형 스마트 폴링] -->|활성 50ms / 유휴 200ms| B
+        A[카카오톡 실행 및 창 생성] -->|SetWinEventHook| B(이벤트 수신 → 20ms 묶음 대기)
+        C[적응형 스마트 폴링] -->|활성 50ms / 유휴 200ms → 조용하면 최대 1s| B
     end
 
     subgraph Inspection["2. 창 계층 식별 및 판정"]
@@ -137,9 +136,9 @@ flowchart TD
 - 본 도구는 네트워크 계층을 일절 건드리지 않고, 카카오톡 윈도우가 화면에 표시될 때 Win32 API 레벨에서 광고 창 영역을 숨기고 친구/채팅 목록의 크기를 아래로 늘려 채우는 방식을 사용합니다.
 
 ### 2. ⚡ Rust 네이티브 초저지연 아키텍처 (SetWinEventHook & 적응형 폴링)
-- **`SetWinEventHook` 커널 훅**: 윈도우 생성(`EVENT_OBJECT_CREATE`), 표시(`EVENT_OBJECT_SHOW`), 활성화(`EVENT_SYSTEM_FOREGROUND`)를 OS 레벨에서 즉시 수신하여 **5ms 이내의 극도로 짧은 지연시간**으로 광고를 제거합니다. 창을 열었을 때 광고가 깜빡거리며 사라지는 현상이 없습니다.
-- **적응형 폴링 (Adaptive Polling)**: 카카오톡이 활성 사용 중일 때는 `50ms`, 유휴 상태일 때는 `200ms`로 동작 주기를 조절하여 불필요한 연산을 방지합니다.
-- **초고속 최적화**: 0.001ms 미만의 프로세스 liveness 검사, UTF-16 제로-알로케이션 프로세스명 비교(`eq_wide_ascii_case`), 메인 윈도우 O(1) 캐싱을 적용해 CPU 점유율을 0.01% 수준으로 유지합니다.
+- **`SetWinEventHook` 이벤트 훅**: 카카오톡 프로세스로 범위를 한정해 윈도우 생성(`EVENT_OBJECT_CREATE`), 표시(`EVENT_OBJECT_SHOW`), 활성화(`EVENT_SYSTEM_FOREGROUND`) 이벤트를 받습니다. 이벤트 묶음을 `burst_scan_interval_ms`(기본 20ms) 동안 모은 뒤 한 번에 처리합니다.
+- **적응형 폴링 (Adaptive Polling)**: 이벤트가 있으면 `poll_interval_ms`(기본 50ms), 없으면 `idle_poll_interval_ms`(기본 200ms)로 재확인하고, 이벤트 없는 상태가 10초 넘게 이어지면 `idle_backoff_max_ms`(기본 1s)까지 늘립니다. 훅 설치에 실패하면 백오프 없이 폴링만으로 동작합니다.
+- **수집 비용 최소화**: 카카오톡 창 트리는 top-level 창마다 한 번만 열거하고, 이미 숨긴 창의 상태는 다시 읽지 않으며, 프로세스 생존 확인은 보관한 핸들로 합니다. 측정 환경에서 창 트리 수집은 1회 약 0.3ms, 판정은 약 0.04ms입니다.
 
 ### 3. 📐 정밀 뷰 리사이즈 공식 (Layout Expansion Formula)
 광고 창을 숨긴 후 하단에 남는 빈 공백을 메인 목록 뷰가 깔끔하게 채우도록 정밀하게 계산하여 크기를 확장합니다:
@@ -270,6 +269,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
   "start_minimized": true,
   "poll_interval_ms": 50,
   "idle_poll_interval_ms": 200,
+  "idle_backoff_max_ms": 1000,
   "pid_scan_interval_ms": 200,
   "cache_cleanup_interval_ms": 1000,
   "burst_scan_iterations": 3,
@@ -278,6 +278,13 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
   "log_level": "INFO"
 }
 ```
+
+- `poll_interval_ms`: 카카오톡 창 이벤트가 최근 2초 안에 있었을 때의 재확인 주기.
+- `idle_poll_interval_ms`: 이벤트가 없을 때의 재확인 주기.
+- `idle_backoff_max_ms`: 이벤트 없는 상태가 10초 넘게 이어지면 유휴 재확인 주기를 10초마다 2배로 늘릴 때의 상한입니다. 이벤트가 오면 즉시 원래 주기로 돌아옵니다. `idle_poll_interval_ms` 이하로 두면 백오프를 끕니다. WinEvent 훅 설치에 실패한 폴링 모드에서는 적용되지 않습니다.
+- `pid_scan_interval_ms`: 카카오톡이 실행 중이 아닐 때의 프로세스 재탐색 시작 주기. 카카오톡이 계속 없으면 5초 뒤 1초, 30초 뒤 2초 간격으로 늘어납니다. 실행 중일 때는 30초마다 한 번 전체 재동기화합니다.
+- `start_minimized`: 트레이 전용 런타임에서는 사용하지 않습니다(호환용으로만 유지).
+- 파일은 BOM 유무와 관계없이 UTF-8로 읽습니다. 실행 중에 JSON을 직접 고쳐도 트레이 메뉴 토글이 그 값을 덮어쓰지 않습니다.
 
 ### layout_rules_v11.json (광고 필터링 규칙)
 카카오톡 업데이트로 내부 윈도우 클래스명이 변경되더라도 바이너리 재빌드 없이 JSON 규칙 파일 수정만으로 유연하게 대응할 수 있습니다:

@@ -12,6 +12,9 @@ pub const SMTO_ABORTIFHUNG: u32 = 0x0002;
 pub trait Win32Api: Send + Sync {
     fn enum_windows(&self, cb: &mut dyn FnMut(i64) -> bool) -> bool;
     fn enum_child_windows(&self, parent: i64, cb: &mut dyn FnMut(i64) -> bool) -> bool;
+    /// Every descendant of `parent` in Win32 `EnumChildWindows` order, without
+    /// the direct-child filter. Lets graph building enumerate a tree once.
+    fn enum_descendant_windows(&self, parent: i64, cb: &mut dyn FnMut(i64) -> bool) -> bool;
     fn get_window_thread_process_id(&self, hwnd: i64) -> i64;
     fn get_class_name(&self, hwnd: i64) -> String;
     fn get_window_text_result(&self, hwnd: i64) -> WindowText;
@@ -20,6 +23,14 @@ pub trait Win32Api: Send + Sync {
     fn get_client_rect(&self, hwnd: i64) -> Option<Rect>;
     fn is_window(&self, hwnd: i64) -> bool;
     fn is_window_visible(&self, hwnd: i64) -> bool;
+    /// The window's own `WS_VISIBLE` style. Unlike `is_window_visible` it does
+    /// not depend on ancestors, so a child restored under a hidden parent
+    /// still reports success.
+    fn has_visible_style(&self, hwnd: i64) -> bool;
+    /// `IsHungAppWindow`: the owning thread has not pumped messages for ~5s.
+    /// Synchronous cross-thread calls (`ShowWindow`, `SetWindowPos`) on such a
+    /// window can block the caller indefinitely.
+    fn is_hung_app_window(&self, hwnd: i64) -> bool;
     fn show_window(&self, hwnd: i64, cmd: i32) -> bool;
     fn set_window_pos(
         &self,

@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "11.1.4"
+version = "11.1.5"
 edition = "2021"
 license = "MIT"
 publish = false
@@ -29,3 +29,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "2", features = ["json", "tls"] }
 windows = "0.61"
+
+# Size/speed for the shipped EXE. `panic` stays "unwind" on purpose: the engine
+# worker contains tick panics with catch_unwind so hidden windows can still be
+# restored (PROJECT_AUDIT 2026-09-24 P9/§5).
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

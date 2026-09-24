@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use kakao_updater::{update_executable_with, UpdateOptions};
+use kakao_updater::{
+    discard_replacement, relaunch_previous, should_relaunch_previous, update_executable_with,
+    UpdateOptions,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info};
@@ -83,7 +86,22 @@ fn main() {
         }
         Err(err) => {
             error!(%err, "update helper failed");
-            show_error_dialog(&err.to_string());
+            discard_replacement(&args.replacement);
+            // Start the previous version first so the user is not left
+            // without the tray app while the error dialog is open.
+            let relaunched = relaunch
+                && should_relaunch_previous(&err)
+                && relaunch_previous(&args.current, &args.relaunch_arg);
+            let message = if relaunched {
+                format!(
+                    "{err}
+
+이전 버전으로 다시 실행했습니다."
+                )
+            } else {
+                err.to_string()
+            };
+            show_error_dialog(&message);
             std::process::exit(1);
         }
     }

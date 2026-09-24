@@ -395,3 +395,143 @@ fn engine_counters_track_hides_and_resizes() {
         "main view resize must be counted for the tray status"
     );
 }
+
+fn default_flags(settings: &AppSettings) -> std::sync::Arc<SharedFlags> {
+    SharedFlags::from_settings(settings, true)
+}
+
+const OWNED_AD_HOST: i64 = 527936;
+const OWNED_AD_CHILD: i64 = 2032986;
+
+#[test]
+fn hung_window_is_neither_hidden_nor_restored() {
+    // PROJECT_AUDIT 2026-09-24 ISSUE-003: synchronous ShowWindow/SetWindowPos
+    // on a not-responding KakaoTalk could block the worker (and shutdown).
+    let (api, pids) = load_owned_popup_fake();
+    let settings = AppSettings::default();
+    let flags = default_flags(&settings);
+    let rules = LayoutRules::default();
+    let mut caches = EngineCaches::new();
+
+    api.set_hung(OWNED_AD_HOST, true);
+    tick(&api, &pids, &settings, &rules, &mut caches, &flags);
+    assert!(
+        api.is_window_visible(OWNED_AD_HOST),
+        "hung window must not be touched"
+    );
+    assert!(caches.snapshots.is_empty());
+
+    api.set_hung(OWNED_AD_HOST, false);
+    tick(&api, &pids, &settings, &rules, &mut caches, &flags);
+    assert!(!api.is_window_visible(OWNED_AD_HOST));
+
+    // KakaoTalk stops responding, then the user disables blocking.
+    api.set_hung(OWNED_AD_HOST, true);
+    api.reset_restore_attempts();
+    let (failures, err) = caches.drain_restore_all(&api);
+    assert_eq!(failures, 1);
+    assert!(err.contains("not responding"), "{err}");
+    assert_eq!(
+        api.restore_attempts(OWNED_AD_HOST),
+        0,
+        "no blocking call while hung"
+    );
+    assert!(
+        caches
+            .snapshots
+            .values()
+            .any(|s| s.identity.hwnd == OWNED_AD_HOST),
+        "snapshot must be kept for a later retry"
+    );
+
+    api.set_hung(OWNED_AD_HOST, false);
+    let (failures, _) = caches.drain_restore_all(&api);
+    assert_eq!(failures, 0);
+    assert!(api.is_window_visible(OWNED_AD_HOST));
+}
+
+#[test]
+fn child_restored_under_a_hidden_parent_is_not_a_failure() {
+    // PROJECT_AUDIT 2026-09-24 ISSUE-004: IsWindowVisible is false for any
+    // child of a hidden window, so correct restores were counted as failures.
+    let (api, _pids) = load_owned_popup_fake();
+    api.set_ancestor_visibility(true);
+    let parent_rect = api.get_window_rect(OWNED_AD_CHILD);
+    api.set_visible(OWNED_AD_HOST, false);
+    api.set_visible(OWNED_AD_CHILD, false);
+
+    let identity = kakao_core::WindowIdentity {
+        hwnd: OWNED_AD_CHILD,
+        pid: api.get_window_thread_process_id(OWNED_AD_CHILD),
+        class_name: api.get_class_name(OWNED_AD_CHILD),
+    };
+    let mut snapshots = std::collections::HashMap::new();
+    snapshots.insert(
+        identity.clone(),
+        kakao_app::engine::RestoreSnapshot {
+            identity,
+            was_visible: true,
+            rect: parent_rect,
+            top_level: false,
+        },
+    );
+    let (failures, err) = kakao_app::engine::restore_all(&api, &mut snapshots);
+    assert_eq!(failures, 0, "unexpected failure: {err}");
+    assert!(snapshots.is_empty());
+    assert!(api.has_visible_style(OWNED_AD_CHILD));
+    assert!(
+        !api.is_window_visible(OWNED_AD_CHILD),
+        "still not effectively visible while the parent is hidden"
+    );
+}
+
+#[test]
+fn restore_error_clears_itself_after_natural_recovery() {
+    // PROJECT_AUDIT 2026-09-24 ISSUE-005: last_error stayed forever after the
+    // failing window recovered on its own.
+    let (api, pids) = load_owned_popup_fake();
+    let settings = AppSettings::default();
+    let flags = default_flags(&settings);
+    let rules = LayoutRules::default();
+    let mut caches = EngineCaches::new();
+
+    tick(&api, &pids, &settings, &rules, &mut caches, &flags);
+    api.set_text(OWNED_AD_HOST, "프로그래밍 토크방");
+    api.set_fail_show_window(OWNED_AD_HOST, true);
+    for _ in 0..4 {
+        tick(&api, &pids, &settings, &rules, &mut caches, &flags);
+    }
+    assert_eq!(flags.restore_failures.load(Ordering::SeqCst), 1);
+    assert!(!flags.last_error_text().is_empty());
+
+    api.set_fail_show_window(OWNED_AD_HOST, false);
+    for _ in 0..20 {
+        tick(&api, &pids, &settings, &rules, &mut caches, &flags);
+    }
+    assert!(api.is_window_visible(OWNED_AD_HOST));
+    assert_eq!(flags.restore_failures.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        flags.last_error_text(),
+        "",
+        "recovered restore must clear its error"
+    );
+}
+
+#[test]
+fn hidden_window_snapshot_is_captured_once() {
+    // PROJECT_AUDIT 2026-09-24 P5: each tick re-captured the snapshot of an
+    // already hidden window (GetWindowRect + IsWindowVisible) and discarded it.
+    let (api, pids) = load_owned_popup_fake();
+    let settings = AppSettings::default();
+    let flags = default_flags(&settings);
+    let rules = LayoutRules::default();
+    let mut caches = EngineCaches::new();
+
+    let ticks = 6;
+    for _ in 0..ticks {
+        tick(&api, &pids, &settings, &rules, &mut caches, &flags);
+    }
+    assert!(!api.is_window_visible(OWNED_AD_HOST));
+    // build_graph reads the rect once per tick; capture adds exactly one more.
+    assert_eq!(api.rect_queries(OWNED_AD_HOST), ticks + 1);
+}

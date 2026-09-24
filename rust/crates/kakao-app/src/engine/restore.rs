@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::Ordering;
 
 use kakao_core::WindowIdentity;
 use kakao_win32::api::{Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_SHOW};
@@ -18,7 +17,11 @@ pub fn restore_all(
 ) -> (u32, String) {
     let mut failures = 0u32;
     let mut last_error = String::new();
-    let pending: Vec<_> = snapshots.drain().map(|(_, snap)| snap).collect();
+    let mut pending: Vec<_> = snapshots.drain().map(|(_, snap)| snap).collect();
+    // Parents before children: a child restored while its hidden popup host
+    // is still hidden is fine style-wise, but restoring top-level windows
+    // first keeps the visible result consistent at every step.
+    pending.sort_by_key(|snap| (!snap.top_level, snap.identity.hwnd));
     for snap in pending {
         if !identity_matches(api, &snap.identity) {
             continue;
@@ -33,6 +36,16 @@ pub fn restore_all(
 }
 
 fn restore_snapshot(api: &dyn Win32Api, snap: &RestoreSnapshot, last_error: &mut String) -> bool {
+    // SetWindowPos/ShowWindow on another thread's window are synchronous; if
+    // KakaoTalk's UI thread is not responding they can block this worker (and
+    // the shutdown join) indefinitely. Keep the snapshot and try later.
+    if api.is_hung_app_window(snap.identity.hwnd) {
+        *last_error = format!(
+            "restore skipped: window not responding hwnd={}",
+            snap.identity.hwnd
+        );
+        return false;
+    }
     let mut ok = true;
     if let Some(rect) = snap.rect {
         if rect.width() > 0 && rect.height() > 0 {
@@ -55,7 +68,10 @@ fn restore_snapshot(api: &dyn Win32Api, snap: &RestoreSnapshot, last_error: &mut
     }
     if snap.was_visible {
         let _ = api.show_window(snap.identity.hwnd, SW_SHOW);
-        if !api.is_window_visible(snap.identity.hwnd) {
+        // The window's own WS_VISIBLE, not IsWindowVisible: the latter is
+        // false for any child whose ancestor is hidden (e.g. KakaoTalk closed
+        // to the tray), which reported successful restores as failures.
+        if !api.has_visible_style(snap.identity.hwnd) {
             ok = false;
             *last_error = format!("restore show failed hwnd={}", snap.identity.hwnd);
         }
@@ -73,18 +89,23 @@ fn retry_cooldown_ticks(attempts: u32) -> u32 {
 
 /// Restore windows this process hid that no longer look like ads.
 ///
-/// A window whose ancestors are hidden (KakaoTalk closed to tray) can refuse to
-/// become visible again for as long as the user leaves it closed. Retrying that
-/// every tick would emit a warning about five times a second forever, so
-/// failures back off exponentially and are logged once per window.
+/// A restore can keep failing for a long time (the window's thread is not
+/// responding, or SetWindowPos/ShowWindow is refused). Retrying that every
+/// tick would emit a warning about five times a second forever, so failures
+/// back off exponentially and are logged once per window.
 pub(super) fn restore_stale_hidden(
     api: &dyn Win32Api,
     caches: &mut EngineCaches,
     matched: &HashSet<WindowIdentity>,
 ) -> (u32, String) {
     let mut last_error = String::new();
-    let pending: Vec<WindowIdentity> = caches.snapshots.keys().cloned().collect();
-    for identity in pending {
+    let mut pending: Vec<(bool, WindowIdentity)> = caches
+        .snapshots
+        .values()
+        .map(|snap| (!snap.top_level, snap.identity.clone()))
+        .collect();
+    pending.sort_by_key(|(child, identity)| (*child, identity.hwnd));
+    for (_, identity) in pending {
         if matched.contains(&identity) {
             caches.stale.remove(&identity);
             continue;
@@ -136,9 +157,8 @@ pub(super) fn restore_stale_hidden(
 }
 
 pub(super) fn report_restore(flags: &SharedFlags, failures: u32, err: &str, context: &str) {
-    flags.restore_failures.store(failures, Ordering::SeqCst);
+    flags.report_restore_failures(failures, err);
     if failures > 0 {
-        flags.set_last_error(err);
         warn!(failures, last_error = %err, "{context}");
     }
 }

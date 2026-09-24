@@ -101,7 +101,13 @@ impl WindowGraph {
     }
 
     pub fn enum_children(&self, parent: Hwnd) -> Vec<Hwnd> {
-        self.children.get(&parent).cloned().unwrap_or_default()
+        self.children_of(parent).to_vec()
+    }
+
+    /// Borrowing form of `enum_children` for recursive walks, which otherwise
+    /// cloned a child vector at every visited node.
+    pub fn children_of(&self, parent: Hwnd) -> &[Hwnd] {
+        self.children.get(&parent).map_or(&[], Vec::as_slice)
     }
 
     pub fn enum_descendants(&self, parent: Hwnd, max_depth: i32) -> Vec<(Hwnd, i32)> {

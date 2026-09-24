@@ -3,7 +3,7 @@
 ## 개요
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
-- 버전: `11.1.4`
+- 버전: `11.1.5`
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
@@ -38,10 +38,20 @@
 - `EngineStatePayload.closed_windows`는 **empty `EVA_ChildWindow` close 요청 수**다. popup dismiss는 `popup_close_requests`가 따로 센다. 실제 창 소멸 확인은 순수 평가 계층이 알 수 없으므로 `SharedFlags.closed_windows`(엔진 계층)가 담당한다.
 - popup dismiss는 `WM_CLOSE` 결과로 분기하지 않고 hide/zero-size fallback을 항상 적용한다. 다만 소멸/거부/미전달 여부를 `DEBUG` 로그로 남긴다(`engine/apply.rs` `apply_evaluation`). 매 tick 반복되는 경로라 `WARN`이 아니다.
 - 복원 실패는 지수 백오프로 재시도하고(`RESTORE_MAX_ATTEMPTS`, `RESTORE_GIVEUP_COOLDOWN_TICKS`) 창당 1회만 경고한다. `restore_failures`는 누적 시도 횟수가 아니라 현재 실패 중인 창 수다.
+- 복원 성공 판정은 `IsWindowVisible`이 아니라 창 자신의 `WS_VISIBLE` 스타일(`Win32Api::has_visible_style`)이다. 부모가 숨겨진 자식 창의 정상 복원을 실패로 세던 문제 때문이다. 복원은 top-level 창부터 수행한다.
+- 응답 없는(`IsHungAppWindow`) 카카오톡 창에는 apply와 복원 모두 동기 Win32 호출을 하지 않고 스냅샷을 보존한다. 종료 시 워커 join은 3초(`WORKER_STOP_TIMEOUT`)로 제한하며, 초과하면 경고 후 프로세스를 종료한다(Python `stop()` join timeout 2.0s 계약에 대응).
+- `last_error`는 출처를 구분한다. 복원 실패로 설정된 오류는 게이지가 0으로 돌아오면 자동으로 지워진다(`SharedFlags::report_restore_failures`). 시작 시 설정 로드 경고 1건을 `복구 실패 > 자동 복구 > 기타` 우선순위로 노출한다(`observability::startup_warning_summary`).
+- 워커 tick panic은 `catch_unwind`로 격리한다(`engine/worker.rs` `guarded_tick`). 스냅샷은 유지하고 `last_error`에 표시하며, 3회 연속이면 5초 쉰다. 루프 자체가 죽으면 drop guard가 `last_error`에 기록한다. 릴리스 프로파일의 `panic`은 이 때문에 `unwind`를 유지한다.
 - 로그 회전은 시작 시 1회가 아니라 `config::RotatingLog`가 기록 중에도 수행한다.
-- WinEvent 훅은 카카오톡 PID로 범위를 한정하며 PID 집합이 바뀌면 재설치한다(`EventHook::install_for_pids`).
+- 설정/규칙 JSON의 UTF-8 BOM은 허용한다(`load_json_value`). 저장은 BOM 없는 UTF-8 + `sync_all` 후 rename이다.
+- 트레이 토글은 디스크의 최신 설정을 다시 읽고 한 필드만 바꿔 저장한다(`config::update_settings`). 시작 시 `run_on_startup=false`인데 Run 값이 있으면 설정을 `true`로 맞춘다(`startup_repair::adopt_registry_startup_state`, Python 계약 "레지스트리 상태로 1회 동기화").
+- WinEvent 훅은 카카오톡 PID로 범위를 한정하며 PID 집합이 바뀌면 재설치한다(`EventHook::install_for_pids`). 차단 OFF 동안에는 훅을 해제한다. 이벤트 병합 대기는 `thread::sleep`이 아니라 `EventHook::pump_for`다(펌프해야 훅 콜백이 실행된다).
+- 워커 스케줄은 `engine/schedule.rs`의 순수 함수가 정한다. PID 스캔은 카카오톡 생존 시 30초마다 전체 재동기화한다(liveness는 `process::PidWatch`의 보관 핸들). 부재 시에는 `pid_scan_interval_ms`에서 시작해 5초 후 1s, 30초 후 2s로 백오프한다.
+- `build_graph`는 top-level마다 `enum_descendant_windows` 1회 + 자손당 `GetParent` 1회로 트리를 만든다. 이전 per-node 알고리즘과의 동일성은 `kakao-app/tests/graph_build_parity.rs`가 고정한다(실데스크톱 비교는 `--ignored`).
 - 워커 tick은 `evaluate_graph_for_apply`(진단 `candidates` 미생성)를 쓰고, `--dump-tree`/`--dump-tree-series`/`--shadow`만 `evaluate_graph_with_states`를 쓴다. 두 경로의 `actions`/`state`는 동일해야 하며 `kakao-core/tests/apply_path_parity.rs`가 이를 고정한다.
-- `poll_interval_ms`는 활성(최근 2초 내 카카오톡 이벤트) 재확인 주기, `idle_poll_interval_ms`는 유휴 재확인 주기, `cache_cleanup_interval_ms`는 `states`/`stale` 캐시 정리 주기로 실제 사용된다. `start_minimized`는 트레이 전용 런타임에서 미사용이며 호환용으로만 파싱한다.
+- `poll_interval_ms`는 활성(최근 2초 내 카카오톡 이벤트) 재확인 주기, `idle_poll_interval_ms`는 유휴 재확인 주기, `cache_cleanup_interval_ms`는 `states`/`stale` 캐시 정리 주기로 실제 사용된다. `idle_backoff_max_ms`(기본 1000)가 `idle_poll_interval_ms`보다 크면, 이벤트 없는 상태가 10초 지속된 뒤 10초마다 유휴 주기를 2배로 늘려 이 값까지 키운다. 이벤트가 오면 즉시 복귀하고, 훅이 없는 폴링 모드에서는 백오프하지 않는다. Python 계약의 "idle→active 약 200ms"는 이벤트 수신 경로 기준으로 유지되고, 훅 누락 시 복구 지연은 최대 `idle_backoff_max_ms`다. `start_minimized`는 트레이 전용 런타임에서 미사용이며 호환용으로만 파싱한다.
+- 업데이트 헬퍼는 교체에 실패하면(부모 대기 초과 제외) staged 파일을 지우고 이전 EXE를 원래 인자로 다시 실행한다(`kakao_updater::should_relaunch_previous`).
+- 성능 측정용 읽기 전용 프로브: `cargo test --release -p kakao-app --test perf_probe -- --ignored --nocapture`.
 - `--self-check`는 APPDATA 쓰기, `HKCU Run` 읽기/쓰기 접근, Run 등록 명령 health, 프로세스 열거를 점검한다. 경고는 `core_warnings`(strict에서 실패)와 `info_warnings`(설정 자동 복구 등, strict에서도 통과)로 분리한다.
 
 ## 엔트리포인트
@@ -63,7 +73,7 @@
 - 엔진 캐시(`snapshots`/`states`/`stale`)와 정리 시계는 `kakao-app/src/engine/caches.rs`의 `EngineCaches`에 모여 있고 `engine/tick.rs`의 `tick(api, pids, settings, rules, caches, flags)`가 이를 받는다
 - Rust 장문 파일은 단일 책임 하위 모듈로 분할되어 있다(순수 이동, 알고리즘·공개 경로 불변). 기존 `.rs` 파일은 `pub use` 퍼사드로 남는다:
   - `kakao-core/src/evaluate/` — `payloads`(진단 DTO) / `mutation_log` / `inspect`(읽기전용 검사) / `apply`(변이 계획) / `orchestrate`(`evaluate_graph*` 진입점)
-  - `kakao-app/src/engine/` — `model`(스냅샷/상수) / `caches`(`EngineCaches`) / `flags`(`SharedFlags`) / `apply`(Win32 적용) / `restore`(복원·백오프) / `tick`(단일 조정 단계) / `worker`(백그라운드 루프)
+  - `kakao-app/src/engine/` — `model`(스냅샷/상수) / `caches`(`EngineCaches`) / `flags`(`SharedFlags`) / `apply`(Win32 적용) / `restore`(복원·백오프) / `schedule`(PID 스캔·재확인 주기 순수 함수) / `tick`(단일 조정 단계) / `worker`(백그라운드 루프, tick panic 격리, `join_with_timeout`)
   - `kakao-win32/src/tray/` — `command` / `state` / `status_text`(Win32-free) / `shell_ready` / `host`(메시지 루프) / `menu`
   - `kakao-app/src/updater/` — `error` / `model` / `version` / `canonical` / `manifest`(서명 검증) / `http` / `staging`
   - `kakao-app/src/config/` — `paths` / `settings` / `storage`(self-heal I/O) / `log`(회전 라이터)

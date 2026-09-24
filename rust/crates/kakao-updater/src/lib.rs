@@ -92,6 +92,40 @@ pub fn wait_for_process_exit(pid: u32, timeout: Duration) -> Result<(), HelperEr
     }
 }
 
+/// Whether the helper should start the previous version after a failed
+/// update. The app has already exited by the time the helper runs, so without
+/// this a failed swap (for example no write access to the install folder) left
+/// the user with no ad blocker running. A wait timeout is the exception: the
+/// app is still running, so starting another copy would be wrong.
+pub fn should_relaunch_previous(err: &HelperError) -> bool {
+    !matches!(err, HelperError::WaitTimeout(_))
+}
+
+/// Start `current` (the previous version after a failed or rolled-back
+/// update). Returns whether the process was spawned.
+pub fn relaunch_previous(current: &Path, args: &[String]) -> bool {
+    if !current.is_file() {
+        return false;
+    }
+    match Command::new(current).args(args).spawn() {
+        Ok(_) => {
+            info!(current = %current.display(), "relaunched the previous version after a failed update");
+            true
+        }
+        Err(err) => {
+            error!(%err, "could not relaunch the previous version");
+            false
+        }
+    }
+}
+
+/// Remove a staged replacement that will not be installed.
+pub fn discard_replacement(replacement: &Path) {
+    if replacement.is_file() {
+        let _ = std::fs::remove_file(replacement);
+    }
+}
+
 pub fn update_executable(
     current: &Path,
     replacement: &Path,

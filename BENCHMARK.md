@@ -1,49 +1,74 @@
-# Benchmark: Python v11 vs Rust v11.1.x
+# Benchmark: KakaoTalk Layout AdBlocker (Rust)
 
-> 본 문서는 기존 Python 기반 KakaoTalk Layout AdBlocker v11(PyInstaller 번들)과 Rust 네이티브(`kakao-adblock-rs` v11.1.x)의 런타임 성능 및 리소스 사용량을 비교 측정한 결과입니다.
+> 이 문서의 수치는 모두 아래 환경에서 **실제로 측정한 값**입니다. 이전 판에 있던 Python v11 비교표와 Rust 수치(EXE 1.8MB, 메모리 3~7MB, 유휴 CPU 0.0%, 반응 5ms 미만, LTO 빌드)는 재현되지 않았고 측정 근거도 남아 있지 않아 삭제했습니다(`PROJECT_AUDIT.md` 2026-09-24 §6).
 
 ---
 
-## 1. 측정 환경 (Environment)
+## 1. 측정 환경
 
-| 항목 | 상세 정보 |
+| 항목 | 값 |
 |---|---|
-| **OS** | Windows 11 Pro 64-bit |
-| **CPU** | ARM64 / x86_64 Compatible Multi-core Processor |
-| **RAM** | 16 GB |
-| **카카오톡 버전** | PC v26.5.x (최신 Win32 클라이언트) |
-| **Python 버전** | Python 3.11.x (PyInstaller 6.x onefile bundle) |
-| **Rust 버전** | rustc 1.85+ (MSVC toolchain, release build with LTO/opt-level 3) |
+| 측정일 | 2026-09-24 |
+| OS | Windows 11 Home 10.0.26200 |
+| CPU | Snapdragon X Plus (ARM64, 8코어). **x64 EXE를 에뮬레이션으로 실행** |
+| 시스템 부하 | 프로세스 약 396개, 데스크톱 top-level 창 약 340개 |
+| 카카오톡 | 26.8.1.5315, 실행 중, 사용자 조작 없음(30초간 WinEvent 0건) |
+| 카카오톡 창 트리 | top-level 34개, 전체 노드 67개 |
+| 빌드 | `cargo build --release` (x86_64-pc-windows-msvc) |
+
+> ⚠️ ARM64에서의 x64 에뮬레이션은 CPU 시간과 Working Set(번역 캐시)을 부풀릴 수 있습니다. 네이티브 x64 PC에서는 더 낮을 것으로 예상하지만 아직 측정하지 않았습니다.
 
 ---
 
-## 2. 벤치마크 결과 비교 (Results)
+## 2. 유휴 CPU / 메모리 (카카오톡 실행 중)
 
-| 측정 항목 (Metric) | Legacy Python v11 | Rust v11.1.x (Native) | 개선율 (Difference) |
-|---|---:|---:|:---:|
-| **실행 파일 크기 (EXE Size)** | 약 26.5 MB | **약 1.8 MB** | **93% 감소** |
-| **초기 실행 속도 (Cold Start)** | 약 1,800 ms ~ 2,500 ms | **약 45 ms ~ 80 ms** | **약 30배 이상 단축** |
-| **트레이 준비 완료까지 시간** | 약 2,200 ms | **약 60 ms** | **즉각 반응 (Sub-second)** |
-| **카카오톡 미실행 유휴 메모리 (Working Set)** | 약 32 MB | **약 3.8 MB** | **88% 감소** |
-| **카카오톡 실행 상주 메모리 (Working Set)** | 약 48 MB ~ 65 MB | **약 5.2 MB ~ 7.1 MB** | **약 89% 절감** |
-| **전용 커밋 메모리 (Private Bytes)** | 약 42 MB | **약 3.2 MB** | **92% 절감** |
-| **10분 유휴 CPU 점유율 (Idle CPU)** | ~0.1% ~ 0.5% (스파이크 발생) | **0.0% (측정 불가 수준)** | **스파이크 없음** |
-| **창 생성 → 광고 제거 반응 지연 (Latency)** | 50 ms ~ 150 ms (폴링 의존) | **< 5 ms (SetWinEventHook)** | **실시간 즉시 반응** |
+방법: `--startup-launch --minimized`로 실행하고 35초 워밍업한 뒤, 60초 동안 `TotalProcessorTime` 증가량을 측정했습니다. 두 빌드를 같은 세션에서 연달아 측정했습니다.
 
----
+| 빌드 | 60초 CPU 시간 | 코어 1개 대비 | 8코어 PC 전체 대비 | Working Set | Private |
+|---|---:|---:|---:|---:|---:|
+| v11.1.4 (감사 전) | 406.2 ms | 0.677% | 약 0.085% | 24.5 MB | 11.0 MB |
+| 감사 반영 빌드 | 93.8 ms | **0.156%** | **약 0.020%** | 21.1 MB | 12.0 MB |
 
-## 3. 세부 분석 및 아키텍처 차이점
+감소 요인:
+- 창 이벤트가 없으면 재확인 주기를 200ms에서 최대 1s로 늘립니다(`idle_backoff_max_ms`).
+- 창 트리를 top-level마다 한 번만 열거합니다.
+- 카카오톡이 살아 있는 동안 전체 프로세스 재스캔 주기를 5s에서 30s로 늘렸습니다.
+- 이미 숨긴 창의 스냅샷을 다시 읽지 않습니다.
 
-### 1) 실행 파일 크기 및 콜드 스타트
-- **Python v11**: Python 인터프리터 DLL, C 확장 모듈, Tkinter 및 베이스 라이브러리를 포함하는 PyInstaller onefile 아카이브로, 실행 시마다 `%TEMP%`에 압축을 해제하는 오버헤드가 발생했습니다.
-- **Rust v11.1.x**: 단일 정적 링크 Win32 네이티브 실행 파일로 압축 해제 단계가 전혀 없으며, 클릭 즉시 메모리에 매핑되어 100ms 이내에 트레이 등록과 첫 스캔을 마칩니다.
+## 3. 구성 요소별 비용 (마이크로벤치)
 
-### 2) 메모리 사용량 (Working Set)
-- **Python v11**: CPython 런타임 자체의 힙 구조와 Tkinter 윈도우 핸들러 등으로 기본 30MB 이상을 상시 점유했습니다.
-- **Rust v11.1.x**: 런타임 인터프리터가 없으며, 윈도우 그래프와 스냅샷이 최소한의 힙 메모리(`Vec`, `HashMap`)만 소비하여 4~7MB 내외로 안정적으로 유지됩니다.
+`cargo test --release -p kakao-app --test perf_probe -- --ignored --nocapture` (읽기 전용, 300회 평균)
 
-### 3) CPU 점유율 및 감지 지연 (Event-driven vs Polling)
-- **이벤트 구동 하이브리드 모델**:
-  - `SetWinEventHook`을 통해 카카오톡의 `EVENT_OBJECT_CREATE`, `EVENT_OBJECT_SHOW`, `EVENT_OBJECT_LOCATIONCHANGE` 이벤트를 실시간 수신하여 즉각 처리합니다.
-  - 이벤트가 없을 때는 완벽한 대기(Wait) 상태를 유지하여 CPU 점유율 0%를 기록합니다.
-  - 혹시 모를 이벤트 누락을 방지하기 위해 200ms 주기의 저비용 reconciliation(조정) 검사를 병행합니다.
+| 단계 | 1회 비용 |
+|---|---:|
+| `EnumWindows` + PID 필터 (데스크톱 약 340개 창) | 45 µs |
+| 카카오톡 창 트리 수집 `build_graph` (위 포함, 67노드) | 307 µs |
+| 판정 `evaluate_graph_for_apply` | 44 µs |
+| 전체 프로세스 스캔 (Toolhelp, 약 396개) | 6.5 ms |
+
+## 4. 카카오톡 미실행 시 (산출값)
+
+프로세스 스캔 1회 6.5 ms 기준:
+
+| 빌드 | 스캔 간격 | 코어 1개 대비 |
+|---|---|---:|
+| v11.1.4 | 200 ms 고정 | 약 3.2% |
+| 감사 반영 빌드 | 200 ms → (5초 후) 1 s → (30초 후) 2 s | 약 0.3% (30초 이후) |
+
+이 표는 종단 간 측정이 아니라 스캔 단가와 코드상 주기로 계산한 값입니다.
+
+## 5. 기타
+
+| 항목 | 값 |
+|---|---|
+| `KakaoTalkLayoutAdBlocker_v11.exe` 크기 | 4,261,376 bytes (LTO·`codegen-units=1`·`strip` 적용 전 4,510,720) |
+| `kakao-updater.exe` 크기 | 1,543,168 bytes |
+| 정상 종료 소요(창 복원 포함) | 113 ms (`taskkill` → 프로세스 종료) |
+| 창 이벤트 → 첫 재확인 | `burst_scan_interval_ms`(기본 20ms) 대기 + tick(약 0.4ms) |
+
+## 6. 재측정 방법
+
+1. 차단기를 한 번에 하나만 실행합니다(단일 인스턴스 mutex).
+2. 워밍업 35초 뒤 60초 동안 PowerShell `(Get-Process -Id <pid>).TotalProcessorTime` 차이를 잽니다.
+3. 구성 요소 비용은 위 `perf_probe` 명령으로 잽니다.
+4. 결과에는 CPU 아키텍처(네이티브/에뮬레이션), 프로세스 수, 카카오톡 버전을 함께 적어 주세요.

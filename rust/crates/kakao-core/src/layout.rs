@@ -2,9 +2,20 @@ use crate::model::Rect;
 use crate::rules::LayoutRules;
 
 pub fn contains_ad_token(rules: &LayoutRules, text: &str) -> bool {
+    contains_any_ad_token(&rules.aggressive_ad_tokens_lc(), text)
+}
+
+/// `contains_ad_token` with the lowercased token list computed by the caller,
+/// so a subtree walk does not rebuild it at every node.
+pub(crate) fn contains_any_ad_token(tokens_lc: &[String], text: &str) -> bool {
+    // Empty text can match neither a word nor a non-empty substring. Most
+    // CEF/EVA nodes have no text, so skip the lowercase and word set.
+    if text.is_empty() {
+        return false;
+    }
     let low = text.to_lowercase();
-    let words = ascii_words(&low);
-    for token in rules.aggressive_ad_tokens_lc() {
+    let mut words: Option<std::collections::HashSet<String>> = None;
+    for token in tokens_lc {
         if token.is_empty() {
             continue;
         }
@@ -12,12 +23,15 @@ pub fn contains_ad_token(rules: &LayoutRules, text: &str) -> bool {
             && token.chars().all(|ch| ch.is_ascii_alphanumeric())
             && token.len() <= 2
         {
-            if words.contains(&token) {
+            if words
+                .get_or_insert_with(|| ascii_words(&low))
+                .contains(token)
+            {
                 return true;
             }
             continue;
         }
-        if low.contains(&token) {
+        if low.contains(token.as_str()) {
             return true;
         }
     }
@@ -115,4 +129,23 @@ pub fn planned_view_resize(
         }
     }
     Some((0, 0, width, height))
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::*;
+
+    #[test]
+    fn ad_token_matching_keeps_word_boundaries_for_short_tokens() {
+        let rules = LayoutRules::default();
+        assert!(!contains_ad_token(&rules, ""));
+        assert!(contains_ad_token(&rules, "AdFit NAS Advertisement"));
+        assert!(contains_ad_token(&rules, "sponsored Ad here"));
+        assert!(
+            !contains_ad_token(&rules, "Adobe Reader"),
+            "short 'ad' needs a word boundary"
+        );
+        assert!(contains_ad_token(&rules, "오늘의 광고"));
+        assert!(!contains_ad_token(&rules, "친구 목록"));
+    }
 }

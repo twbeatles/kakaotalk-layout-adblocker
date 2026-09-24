@@ -7,7 +7,8 @@
 - Version line: `v11`
 - Scope: Layout-only ad blocking (no hosts, no DNS flush, no AdFit registry writes)
 - Non-Windows execution: fail-fast with message and exit code `2`
-- Polling model: adaptive (active 50ms / idle 200ms by default)
+- Polling model: adaptive (active 50ms / idle 200ms by default; after 10s without KakaoTalk window events the idle interval backs off to `idle_backoff_max_ms`, 1s by default, while the WinEvent hook is installed)
+- Rust runtime specifics (v11.1.5): see `CLAUDE.md` "Rust 활성 런타임 동작" — BOM-tolerant JSON, `WS_VISIBLE` restore check, hung-window guard + 3s shutdown join, KakaoTalk-absent PID scan backoff (1s after 5s, 2s after 30s), tick panic containment
 
 ## Ad-Blocking Algorithm Contract
 
@@ -56,7 +57,7 @@
   - AppData path: `%APPDATA%\KakaoTalkAdBlockerLayout`
   - runtime path resolution is lazy via `resolve_app_data_dir()` and `get_runtime_paths()`
   - compatibility aliases (`APPDATA_DIR`, `SETTINGS_FILE`, `RULES_FILE`, `LOG_FILE`) stay exported for callers, but internal runtime logic uses the helper lookups
-  - advanced perf knobs: `idle_poll_interval_ms`, `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
+  - advanced perf knobs: `idle_poll_interval_ms`, `idle_backoff_max_ms` (Rust only), `pid_scan_interval_ms`, `cache_cleanup_interval_ms`
   - burst scan knobs: `burst_scan_iterations`, `burst_scan_interval_ms`
   - missing new perf fields are backfilled with safe defaults
   - new rules flags: `hide_bottom_banner_without_token=false`, `close_empty_eva_child_requires_ad_signal=true`

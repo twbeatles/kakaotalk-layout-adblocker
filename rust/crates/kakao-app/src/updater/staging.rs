@@ -125,6 +125,13 @@ pub fn launch_helper(staged: &StagedUpdate) -> Result<(), UpdateError> {
     Ok(())
 }
 
+/// Delete staged files when the helper could not be started, so repeated
+/// failures do not accumulate executables in %TEMP%.
+pub fn discard_staged(staged: &StagedUpdate) {
+    let _ = std::fs::remove_file(&staged.helper);
+    let _ = std::fs::remove_file(&staged.replacement);
+}
+
 pub fn apply_update(manifest: &UpdateManifest) -> Result<(), UpdateError> {
     let staged = prepare_update(manifest)?;
     launch_helper(&staged)

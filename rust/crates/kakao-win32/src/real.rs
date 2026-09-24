@@ -7,10 +7,10 @@ use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WIN32_ERROR, WPARAM};
 use windows::Win32::Graphics::Gdi::UpdateWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, EnumWindows, GetClassNameW, GetClientRect, GetParent, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
-    SendMessageTimeoutW, SetWindowPos, ShowWindow, SEND_MESSAGE_TIMEOUT_FLAGS,
-    SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD,
+    EnumChildWindows, EnumWindows, GetClassNameW, GetClientRect, GetParent, GetWindowLongPtrW,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow,
+    IsWindow, IsWindowVisible, SendMessageTimeoutW, SetWindowPos, ShowWindow, GWL_STYLE,
+    SEND_MESSAGE_TIMEOUT_FLAGS, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, WS_VISIBLE,
 };
 
 use crate::api::{window_text_from_length_and_copy, Win32Api, SMTO_ABORTIFHUNG};
@@ -72,6 +72,20 @@ impl Win32Api for RealWin32 {
                 }
             }
         });
+        ok
+    }
+
+    fn enum_descendant_windows(&self, parent: i64, cb: &mut dyn FnMut(i64) -> bool) -> bool {
+        ENUM_ACCUM.with(|acc| acc.borrow_mut().clear());
+        let ok =
+            unsafe { EnumChildWindows(Some(hwnd_from_i64(parent)), Some(enum_proc), LPARAM(0)) }
+                .as_bool();
+        let hwnds = ENUM_ACCUM.with(|acc| std::mem::take(&mut *acc.borrow_mut()));
+        for hwnd in hwnds {
+            if !cb(hwnd) {
+                break;
+            }
+        }
         ok
     }
 
@@ -155,6 +169,15 @@ impl Win32Api for RealWin32 {
 
     fn is_window_visible(&self, hwnd: i64) -> bool {
         unsafe { IsWindowVisible(hwnd_from_i64(hwnd)) }.as_bool()
+    }
+
+    fn has_visible_style(&self, hwnd: i64) -> bool {
+        let style = unsafe { GetWindowLongPtrW(hwnd_from_i64(hwnd), GWL_STYLE) };
+        (style as u32) & WS_VISIBLE.0 != 0
+    }
+
+    fn is_hung_app_window(&self, hwnd: i64) -> bool {
+        unsafe { IsHungAppWindow(hwnd_from_i64(hwnd)) }.as_bool()
     }
 
     fn show_window(&self, hwnd: i64, cmd: i32) -> bool {

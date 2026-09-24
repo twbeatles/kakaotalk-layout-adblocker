@@ -1,6 +1,6 @@
 use crate::graph::WindowGraph;
 use crate::layout::{
-    contains_ad_token, is_bottom_banner_candidate, is_chrome_widget_class,
+    contains_any_ad_token, is_bottom_banner_candidate, is_chrome_widget_class,
     should_close_empty_eva_child,
 };
 use crate::model::{
@@ -120,18 +120,28 @@ pub fn subtree_contains_ad_token(
     hwnd: Hwnd,
     max_depth: i32,
 ) -> bool {
-    if max_depth < 0 || graph.get(hwnd).is_none() {
+    subtree_has_ad_token(graph, &rules.aggressive_ad_tokens_lc(), hwnd, max_depth)
+}
+
+fn subtree_has_ad_token(
+    graph: &WindowGraph,
+    tokens_lc: &[String],
+    hwnd: Hwnd,
+    max_depth: i32,
+) -> bool {
+    if max_depth < 0 {
         return false;
     }
-    if let Some(node) = graph.get(hwnd) {
-        if contains_ad_token(rules, node.text()) {
-            return true;
-        }
+    let Some(node) = graph.get(hwnd) else {
+        return false;
+    };
+    if contains_any_ad_token(tokens_lc, node.text()) {
+        return true;
     }
     graph
-        .enum_children(hwnd)
-        .into_iter()
-        .any(|child| subtree_contains_ad_token(graph, rules, child, max_depth - 1))
+        .children_of(hwnd)
+        .iter()
+        .any(|&child| subtree_has_ad_token(graph, tokens_lc, child, max_depth - 1))
 }
 
 pub fn class_name_starts_with(
@@ -150,9 +160,9 @@ pub fn class_name_starts_with(
         return true;
     }
     graph
-        .enum_children(hwnd)
-        .into_iter()
-        .any(|child| class_name_starts_with(graph, child, prefix, max_depth - 1))
+        .children_of(hwnd)
+        .iter()
+        .any(|&child| class_name_starts_with(graph, child, prefix, max_depth - 1))
 }
 
 pub fn has_window_text(graph: &WindowGraph, hwnd: Hwnd, target: &str, max_depth: i32) -> bool {
@@ -166,9 +176,9 @@ pub fn has_window_text(graph: &WindowGraph, hwnd: Hwnd, target: &str, max_depth:
         return true;
     }
     graph
-        .enum_children(hwnd)
-        .into_iter()
-        .any(|child| has_window_text(graph, child, target, max_depth - 1))
+        .children_of(hwnd)
+        .iter()
+        .any(|&child| has_window_text(graph, child, target, max_depth - 1))
 }
 
 pub fn has_window_text_contains(
@@ -181,19 +191,26 @@ pub fn has_window_text_contains(
     if needle.is_empty() {
         return false;
     }
+    subtree_text_contains(graph, hwnd, &needle, max_depth)
+}
+
+/// Recursive part of `has_window_text_contains` with the needle lowercased
+/// once by the caller instead of at every node.
+fn subtree_text_contains(graph: &WindowGraph, hwnd: Hwnd, needle_lc: &str, max_depth: i32) -> bool {
     if max_depth < 0 {
         return false;
     }
     let Some(node) = graph.get(hwnd) else {
         return false;
     };
-    if node.text().to_lowercase().contains(&needle) {
+    let text = node.text();
+    if !text.is_empty() && text.to_lowercase().contains(needle_lc) {
         return true;
     }
     graph
-        .enum_children(hwnd)
-        .into_iter()
-        .any(|child| has_window_text_contains(graph, child, target, max_depth - 1))
+        .children_of(hwnd)
+        .iter()
+        .any(|&child| subtree_text_contains(graph, child, needle_lc, max_depth - 1))
 }
 
 pub fn legacy_signature_kind(graph: &WindowGraph, rules: &LayoutRules, hwnd: Hwnd) -> String {

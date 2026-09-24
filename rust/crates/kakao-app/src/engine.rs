@@ -5,6 +5,7 @@
 // - `flags`: cross-thread `SharedFlags`
 // - `apply`: `apply_evaluation` (Win32 mutation) + snapshot capture
 // - `restore`: restore-all/stale-restore with backoff + `report_restore`
+// - `schedule`: PID-scan / reconciliation cadence (pure, unit-tested)
 // - `tick`: single reconciliation step
 // - `worker`: background `spawn_worker` loop
 //
@@ -15,6 +16,7 @@ mod caches;
 mod flags;
 mod model;
 mod restore;
+pub mod schedule;
 mod tick;
 mod worker;
 
@@ -24,4 +26,4 @@ pub use flags::SharedFlags;
 pub use model::{RestoreSnapshot, StaleState, RESTORE_MISS_THRESHOLD};
 pub use restore::restore_all;
 pub use tick::tick;
-pub use worker::spawn_worker;
+pub use worker::{join_with_timeout, spawn_worker};

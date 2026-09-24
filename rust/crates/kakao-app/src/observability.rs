@@ -66,9 +66,46 @@ pub fn init_tracing(log_path: Option<&std::path::Path>, log_level: &str) {
         .try_init();
 }
 
+/// The one startup warning worth surfacing in the tray, using the Python
+/// v11 priority: a failed self-heal, then a successful self-heal, then
+/// anything else. The rest stay in the log.
+pub fn startup_warning_summary(warnings: &[String]) -> Option<String> {
+    warnings
+        .iter()
+        .find(|w| w.contains("복구 실패"))
+        .or_else(|| warnings.iter().find(|w| w.contains("자동 복구")))
+        .or_else(|| warnings.first())
+        .cloned()
+}
+
 pub fn file_stamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "0".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_warning_summary_prefers_failed_then_successful_heal() {
+        let other = "layout_rules_v11.json 필드 'x' 타입이 올바르지 않아".to_string();
+        let healed = "layout_settings_v11.json 자동 복구 성공: 기본값".to_string();
+        let failed = "layout_rules_v11.json 자동 복구 실패(denied)".to_string();
+        assert_eq!(startup_warning_summary(&[]), None);
+        assert_eq!(
+            startup_warning_summary(std::slice::from_ref(&other)).as_deref(),
+            Some(other.as_str())
+        );
+        assert_eq!(
+            startup_warning_summary(&[other.clone(), healed.clone()]).as_deref(),
+            Some(healed.as_str())
+        );
+        assert_eq!(
+            startup_warning_summary(&[healed, other, failed.clone()]).as_deref(),
+            Some(failed.as_str())
+        );
+    }
 }
