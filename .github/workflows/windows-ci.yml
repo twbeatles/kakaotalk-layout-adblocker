@@ -73,6 +73,16 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+      - name: Machete
+        run: |
+          cargo install cargo-machete --locked
+          cargo machete
+
       - name: Test
         run: cargo test --workspace
 

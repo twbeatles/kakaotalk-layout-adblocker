@@ -10,7 +10,6 @@ description = "Isolated Win32 wrappers for KakaoTalk layout adblock"
 kakao-core.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-thiserror.workspace = true
 crossbeam-channel.workspace = true
 
 [target.'cfg(windows)'.dependencies]

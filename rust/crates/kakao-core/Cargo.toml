@@ -9,7 +9,6 @@ description = "Pure KakaoTalk layout-adblock decision engine (no Win32)"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

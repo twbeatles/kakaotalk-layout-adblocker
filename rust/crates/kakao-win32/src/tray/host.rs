@@ -226,6 +226,9 @@ unsafe extern "system" fn wnd_proc(
     if host.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     }
+    // SAFETY: GWLP_USERDATA holds `addr_of!(host)` from `run_loop_inner`, whose
+    // stack frame (and `host`) outlives the message loop dispatching here on
+    // this same thread; null was rejected above.
     let host = unsafe { &*host };
     match msg {
         WM_TRAY => {

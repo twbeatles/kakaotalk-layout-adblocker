@@ -127,6 +127,8 @@ pub fn set_run_command(command: &str) -> bool {
     }
     let mut wide: Vec<u16> = command.encode_utf16().collect();
     wide.push(0);
+    // SAFETY: `wide` outlives the synchronous `RegSetValueExW` call below, so
+    // `[ptr, ptr + len * 2)` stays inside the Vec allocation (`u8` alignment 1).
     let bytes = unsafe { std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2) };
     let status = unsafe { RegSetValueExW(key, VALUE_NAME, Some(0), REG_SZ, Some(bytes)) };
     let _ = unsafe { RegCloseKey(key) };

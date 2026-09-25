@@ -17,7 +17,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-crossbeam-channel.workspace = true
 kakao-core.workspace = true
 kakao-win32.workspace = true
 serde.workspace = true
