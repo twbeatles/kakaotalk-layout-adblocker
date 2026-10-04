@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
+use tracing::warn;
 
 use super::canonical::canonical_payload_python;
 use super::error::UpdateError;
@@ -123,6 +124,11 @@ pub fn parse_and_verify_manifest(
                     "업데이트 매니페스트가 만료되었습니다.".into(),
                 ));
             }
+        } else {
+            // Fail open (the signature is valid; only our builder mints these),
+            // but say so: an unparseable timestamp means the builder changed.
+            // PROJECT_AUDIT 2026-10-04 Phase 3.
+            warn!("update manifest expires_at is not RFC3339; accepting on signature");
         }
     }
     if !is_newer(&version, current_version)? {
@@ -215,5 +221,15 @@ mod tests {
         // Against current version 11.1.0, it should recognize it as latest (NoUpdate)
         let err = parse_and_verify_manifest(doc.as_bytes(), "11.1.0").unwrap_err();
         assert!(matches!(err, UpdateError::NoUpdate));
+    }
+
+    #[test]
+    fn expiry_timestamp_parsing_documents_fail_open() {
+        // PROJECT_AUDIT 2026-10-04 Phase 3: a valid timestamp parses, garbage
+        // does not, and garbage stays fail-open (signature is what protects
+        // the payload). The warn! in parse_and_verify_manifest is the signal.
+        assert!(parse_rfc3339_timestamp("2027-09-02T13:41:52Z").is_some());
+        assert!(parse_rfc3339_timestamp("not-a-timestamp").is_none());
+        assert!(parse_rfc3339_timestamp("2027-13-99T99:99:99Z").is_none());
     }
 }

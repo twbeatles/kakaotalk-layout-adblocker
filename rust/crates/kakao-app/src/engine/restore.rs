@@ -8,20 +8,17 @@ use super::apply::identity_matches;
 use super::caches::EngineCaches;
 use super::flags::SharedFlags;
 use super::model::{
-    RestoreSnapshot, RESTORE_GIVEUP_COOLDOWN_TICKS, RESTORE_MAX_ATTEMPTS, RESTORE_MISS_THRESHOLD,
+    RestoreSnapshot, StaleState, RESTORE_GIVEUP_COOLDOWN_TICKS, RESTORE_MAX_ATTEMPTS,
+    RESTORE_MISS_THRESHOLD,
 };
 
-pub fn restore_all(
+fn restore_pending(
     api: &dyn Win32Api,
     snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+    pending: Vec<RestoreSnapshot>,
 ) -> (u32, String) {
     let mut failures = 0u32;
     let mut last_error = String::new();
-    let mut pending: Vec<_> = snapshots.drain().map(|(_, snap)| snap).collect();
-    // Parents before children: a child restored while its hidden popup host
-    // is still hidden is fine style-wise, but restoring top-level windows
-    // first keeps the visible result consistent at every step.
-    pending.sort_by_key(|snap| (!snap.top_level, snap.identity.hwnd));
     for snap in pending {
         if !identity_matches(api, &snap.identity) {
             continue;
@@ -33,6 +30,41 @@ pub fn restore_all(
         snapshots.insert(snap.identity.clone(), snap);
     }
     (failures, last_error)
+}
+
+pub fn restore_all(
+    api: &dyn Win32Api,
+    snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+) -> (u32, String) {
+    let mut pending: Vec<_> = snapshots.drain().map(|(_, snap)| snap).collect();
+    // Parents before children: a child restored while its hidden popup host
+    // is still hidden is fine style-wise, but restoring top-level windows
+    // first keeps the visible result consistent at every step.
+    pending.sort_by_key(|snap| (!snap.top_level, snap.identity.hwnd));
+    restore_pending(api, snapshots, pending)
+}
+
+/// Shutdown variant of `restore_all`: windows that already failed a restore
+/// (tracked in `stale`) go last, so a shutdown join timeout abandons the
+/// already-failing (likely hung) windows instead of the healthy ones.
+/// PROJECT_AUDIT 2026-10-04 ISSUE-001.
+pub fn restore_all_final(
+    api: &dyn Win32Api,
+    snapshots: &mut HashMap<WindowIdentity, RestoreSnapshot>,
+    stale: &HashMap<WindowIdentity, StaleState>,
+) -> (u32, String) {
+    let mut pending: Vec<_> = snapshots.drain().map(|(_, snap)| snap).collect();
+    pending.sort_by_key(|snap| {
+        (
+            stale
+                .get(&snap.identity)
+                .map_or(0, |state| state.attempts)
+                .min(1),
+            !snap.top_level,
+            snap.identity.hwnd,
+        )
+    });
+    restore_pending(api, snapshots, pending)
 }
 
 fn restore_snapshot(api: &dyn Win32Api, snap: &RestoreSnapshot, last_error: &mut String) -> bool {

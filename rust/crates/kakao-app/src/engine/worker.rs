@@ -32,6 +32,7 @@ impl Drop for WorkerExitGuard {
             error!("engine worker loop panicked; ad blocking has stopped");
             self.0
                 .set_last_error("엔진 워커가 중단되었습니다. 프로그램을 다시 시작해 주세요.");
+            self.0.worker_exited.store(true, Ordering::SeqCst);
         }
     }
 }
@@ -313,9 +314,10 @@ pub fn spawn_worker(
             flags.stopping.load(Ordering::SeqCst)
         );
         if flags.apply.load(Ordering::SeqCst) {
-            let (failures, err) = caches.drain_restore_all(api.as_ref());
+            let (failures, err) = caches.drain_restore_all_final(api.as_ref());
             report_restore(&flags, failures, &err, "restore on stop had failures");
         }
+        flags.worker_exited.store(true, Ordering::SeqCst);
         caches
     })
 }

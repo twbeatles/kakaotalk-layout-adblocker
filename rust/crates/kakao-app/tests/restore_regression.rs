@@ -535,3 +535,51 @@ fn hidden_window_snapshot_is_captured_once() {
     // build_graph reads the rect once per tick; capture adds exactly one more.
     assert_eq!(api.rect_queries(OWNED_AD_HOST), ticks + 1);
 }
+
+#[test]
+fn shutdown_restore_puts_healthy_windows_first() {
+    // PROJECT_AUDIT 2026-10-04 ISSUE-001: the shutdown restore attempts
+    // never-failed snapshots before already-failing ones, so a shutdown
+    // join timeout abandons the (likely hung) failures instead of healthy
+    // windows. OWNED_AD_HOST sorts before OWNED_AD_CHILD, so the old
+    // top-level+hwnd order would attempt the failing host first.
+    let (api, _pids) = load_owned_popup_fake();
+    let identity = |hwnd: i64| kakao_core::WindowIdentity {
+        hwnd,
+        pid: api.get_window_thread_process_id(hwnd),
+        class_name: api.get_class_name(hwnd),
+    };
+    let mut caches = EngineCaches::new();
+    for hwnd in [OWNED_AD_HOST, OWNED_AD_CHILD] {
+        api.set_visible(hwnd, false);
+        let id = identity(hwnd);
+        caches.snapshots.insert(
+            id.clone(),
+            kakao_app::engine::RestoreSnapshot {
+                identity: id,
+                was_visible: true,
+                rect: api.get_window_rect(hwnd),
+                top_level: true,
+            },
+        );
+    }
+    caches.stale.insert(
+        identity(OWNED_AD_HOST),
+        kakao_app::engine::StaleState {
+            attempts: 1,
+            ..Default::default()
+        },
+    );
+    api.set_fail_show_window(OWNED_AD_HOST, true);
+
+    let (failures, _) = caches.drain_restore_all_final(&api);
+    assert_eq!(failures, 1);
+    assert!(
+        api.has_visible_style(OWNED_AD_CHILD),
+        "healthy window must be restored even though the failing host is also attempted"
+    );
+    assert_eq!(
+        api.take_restore_order(),
+        vec![OWNED_AD_CHILD, OWNED_AD_HOST]
+    );
+}

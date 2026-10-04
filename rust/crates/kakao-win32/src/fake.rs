@@ -48,6 +48,7 @@ struct Inner {
     fail_set_pos: HashSet<i64>,
     fail_show: HashSet<i64>,
     restore_attempts: HashMap<i64, u64>,
+    restore_order: Vec<i64>,
     hung: HashSet<i64>,
     ancestor_visibility: bool,
     rect_queries: HashMap<i64, u64>,
@@ -72,6 +73,7 @@ impl FakeWin32 {
             fail_set_pos: HashSet::new(),
             fail_show: HashSet::new(),
             restore_attempts: HashMap::new(),
+            restore_order: Vec::new(),
             hung: HashSet::new(),
             ancestor_visibility: false,
             rect_queries: HashMap::new(),
@@ -135,6 +137,13 @@ impl FakeWin32 {
 
     pub fn reset_restore_attempts(&self) {
         self.with(|inner| inner.restore_attempts.clear());
+    }
+
+    /// Hwnds in the order a restore was attempted on them (SW_SHOW). Lets
+    /// tests assert restore ordering (e.g. shutdown restores healthy
+    /// windows before already-failing ones).
+    pub fn take_restore_order(&self) -> Vec<i64> {
+        self.with(|inner| std::mem::take(&mut inner.restore_order))
     }
 
     pub fn set_fail_show_window(&self, hwnd: i64, fail: bool) {
@@ -369,6 +378,7 @@ impl Win32Api for FakeWin32 {
         self.with(|inner| {
             if cmd == SW_SHOW {
                 *inner.restore_attempts.entry(hwnd).or_insert(0) += 1;
+                inner.restore_order.push(hwnd);
             }
             if inner.fail_show.contains(&hwnd) {
                 return false;

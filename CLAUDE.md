@@ -38,13 +38,16 @@
 - `EngineStatePayload.closed_windows`는 **empty `EVA_ChildWindow` close 요청 수**다. popup dismiss는 `popup_close_requests`가 따로 센다. 실제 창 소멸 확인은 순수 평가 계층이 알 수 없으므로 `SharedFlags.closed_windows`(엔진 계층)가 담당한다.
 - popup dismiss는 `WM_CLOSE` 결과로 분기하지 않고 hide/zero-size fallback을 항상 적용한다. 다만 소멸/거부/미전달 여부를 `DEBUG` 로그로 남긴다(`engine/apply.rs` `apply_evaluation`). 매 tick 반복되는 경로라 `WARN`이 아니다.
 - 복원 실패는 지수 백오프로 재시도하고(`RESTORE_MAX_ATTEMPTS`, `RESTORE_GIVEUP_COOLDOWN_TICKS`) 창당 1회만 경고한다. `restore_failures`는 누적 시도 횟수가 아니라 현재 실패 중인 창 수다.
+- 종료 시 복원은 `drain_restore_all_final`로 한 번도 실패하지 않은 창부터 수행하고(`engine/restore.rs`), join 타임아웃 시 미복원 게이지(`restore_failures`)와 누적 숨김 수를 로그에 남긴다.
 - 복원 성공 판정은 `IsWindowVisible`이 아니라 창 자신의 `WS_VISIBLE` 스타일(`Win32Api::has_visible_style`)이다. 부모가 숨겨진 자식 창의 정상 복원을 실패로 세던 문제 때문이다. 복원은 top-level 창부터 수행한다.
 - 응답 없는(`IsHungAppWindow`) 카카오톡 창에는 apply와 복원 모두 동기 Win32 호출을 하지 않고 스냅샷을 보존한다. 종료 시 워커 join은 3초(`WORKER_STOP_TIMEOUT`)로 제한하며, 초과하면 경고 후 프로세스를 종료한다(Python `stop()` join timeout 2.0s 계약에 대응).
 - `last_error`는 출처를 구분한다. 복원 실패로 설정된 오류는 게이지가 0으로 돌아오면 자동으로 지워진다(`SharedFlags::report_restore_failures`). 시작 시 설정 로드 경고 1건을 `복구 실패 > 자동 복구 > 기타` 우선순위로 노출한다(`observability::startup_warning_summary`).
 - 워커 tick panic은 `catch_unwind`로 격리한다(`engine/worker.rs` `guarded_tick`). 스냅샷은 유지하고 `last_error`에 표시하며, 3회 연속이면 5초 쉰다. 루프 자체가 죽으면 drop guard가 `last_error`에 기록한다. 릴리스 프로파일의 `panic`은 이 때문에 `unwind`를 유지한다.
+- 워커 루프가 예상 밖으로 끝나면 감시 스레드가 2초 간격으로 감지해 다이얼로그 1회로 재시작을 유도한다. 스냅샷 없는 새 워커는 띄우지 않는다(복원放棄 방지).
 - 로그 회전은 시작 시 1회가 아니라 `config::RotatingLog`가 기록 중에도 수행한다.
 - 설정/규칙 JSON의 UTF-8 BOM은 허용한다(`load_json_value`). 저장은 BOM 없는 UTF-8 + `sync_all` 후 rename이다.
 - 트레이 토글은 디스크의 최신 설정을 다시 읽고 한 필드만 바꿔 저장한다(`config::update_settings`). 시작 시 `run_on_startup=false`인데 Run 값이 있으면 설정을 `true`로 맞춘다(`startup_repair::adopt_registry_startup_state`, Python 계약 "레지스트리 상태로 1회 동기화").
+- 시작프로그램 토글의 레지스트리 실패는 에러 다이얼로그로 알리고 메뉴 상태는 그대로 둔다.
 - WinEvent 훅은 카카오톡 PID로 범위를 한정하며 PID 집합이 바뀌면 재설치한다(`EventHook::install_for_pids`). 차단 OFF 동안에는 훅을 해제한다. 이벤트 병합 대기는 `thread::sleep`이 아니라 `EventHook::pump_for`다(펌프해야 훅 콜백이 실행된다).
 - 워커 스케줄은 `engine/schedule.rs`의 순수 함수가 정한다. PID 스캔은 카카오톡 생존 시 30초마다 전체 재동기화한다(liveness는 `process::PidWatch`의 보관 핸들). 부재 시에는 `pid_scan_interval_ms`에서 시작해 5초 후 1s, 30초 후 2s로 백오프한다.
 - `build_graph`는 top-level마다 `enum_descendant_windows` 1회 + 자손당 `GetParent` 1회로 트리를 만든다. 이전 per-node 알고리즘과의 동일성은 `kakao-app/tests/graph_build_parity.rs`가 고정한다(실데스크톱 비교는 `--ignored`).

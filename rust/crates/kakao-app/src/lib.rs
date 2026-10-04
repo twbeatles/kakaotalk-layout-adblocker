@@ -166,6 +166,39 @@ pub fn run_with_args(args: Args) -> i32 {
 
     let worker = spawn_worker(api, flags.clone(), settings.clone(), rules);
     info!("spawn_worker completed in main thread");
+    // Watchdog: the worker loop only ends on `stopping` (or a panic
+    // outside the per-tick guard, which WorkerExitGuard already reports).
+    // Either way ad blocking is dead while the tray would look alive, so
+    // wake the user once instead of leaving a stale-healthy icon. A fresh
+    // worker cannot simply be spawned: it would own no snapshots and
+    // abandon every pending restore. PROJECT_AUDIT 2026-10-04 Gap-01.
+    #[cfg(windows)]
+    {
+        let watch_flags = flags.clone();
+        std::thread::spawn(move || {
+            let mut alerted = false;
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if watch_flags
+                    .stopping
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    break;
+                }
+                if note_unexpected_worker_exit(
+                    &mut alerted,
+                    watch_flags
+                        .worker_exited
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                ) {
+                    dialogs::show_error_box(
+                        "엔진 중단",
+                        "광고 차단 엔진이 중단되었습니다. 프로그램을 다시 시작해 주세요.",
+                    );
+                }
+            }
+        });
+    }
     let pending_update: Arc<Mutex<Option<updater::StagedUpdate>>> = Arc::new(Mutex::new(None));
     let startup_trace = args.startup_trace.clone();
     let startup_launch = args.startup_launch;
@@ -256,6 +289,11 @@ pub fn run_with_args(args: Args) -> i32 {
                                 let _ = crate::startup::set_enabled(!next);
                             }
                         }
+                    } else {
+                        dialogs::show_error_box(
+                            "시작프로그램",
+                            "시작프로그램 등록 변경에 실패했습니다. 레지스트리 접근이 차단되어 있는지 확인해 주세요.",
+                        );
                     }
                 }
                 TrayCommand::ResetRestoreFailures => {
@@ -363,7 +401,15 @@ pub fn run_with_args(args: Args) -> i32 {
             info!("tray unavailable, stopping worker then exiting");
             match engine::join_with_timeout(worker, WORKER_STOP_TIMEOUT) {
                 Some(Err(_)) => error!("engine worker panic"),
-                None => tracing::warn!("engine worker did not stop in time; exiting anyway"),
+                None => {
+                    let pending = flags
+                        .restore_failures
+                        .load(std::sync::atomic::Ordering::SeqCst);
+                    tracing::warn!(
+                        pending_restore_failures = pending,
+                        "engine worker did not stop in time; hidden windows may stay hidden until KakaoTalk restarts"
+                    );
+                }
                 Some(Ok(_)) => {}
             }
             return 1;
@@ -393,9 +439,17 @@ pub fn run_with_args(args: Args) -> i32 {
             false
         }
         None => {
+            let pending = flags
+                .restore_failures
+                .load(std::sync::atomic::Ordering::SeqCst);
+            let hidden_total = flags
+                .hidden_windows
+                .load(std::sync::atomic::Ordering::SeqCst);
             tracing::warn!(
                 timeout_ms = WORKER_STOP_TIMEOUT.as_millis() as u64,
-                "engine worker did not stop in time (KakaoTalk may not be responding); exiting without it"
+                pending_restore_failures = pending,
+                hidden_windows_total = hidden_total,
+                "engine worker did not stop in time (KakaoTalk may not be responding); hidden windows may stay hidden until KakaoTalk restarts"
             );
             false
         }
@@ -423,5 +477,30 @@ pub fn run_with_args(args: Args) -> i32 {
         0
     } else {
         1
+    }
+}
+
+/// Latch for the worker watchdog: report an unexpected worker exit exactly
+/// once. Returns true when the caller should alert the user.
+/// PROJECT_AUDIT 2026-10-04 Gap-01.
+fn note_unexpected_worker_exit(alerted: &mut bool, exited: bool) -> bool {
+    if exited && !*alerted {
+        *alerted = true;
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::note_unexpected_worker_exit;
+
+    #[test]
+    fn worker_exit_alert_fires_exactly_once() {
+        let mut alerted = false;
+        assert!(!note_unexpected_worker_exit(&mut alerted, false));
+        assert!(note_unexpected_worker_exit(&mut alerted, true));
+        assert!(!note_unexpected_worker_exit(&mut alerted, true));
     }
 }

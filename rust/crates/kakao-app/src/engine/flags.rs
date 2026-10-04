@@ -10,6 +10,9 @@ pub struct SharedFlags {
     pub apply: Arc<AtomicBool>,
     pub startup: Arc<AtomicBool>,
     pub reset_restore: Arc<AtomicBool>,
+    /// Set once the worker thread finishes (normal stop or loop panic)
+    /// so a watchdog can notice an unexpected exit.
+    pub worker_exited: Arc<AtomicBool>,
     /// Gauge: windows currently stuck in a failed restore (not a running total).
     pub restore_failures: Arc<AtomicU32>,
     /// Gauge: confirmed KakaoTalk main windows seen by the last evaluation.
@@ -36,6 +39,7 @@ impl SharedFlags {
             apply: Arc::new(AtomicBool::new(apply)),
             startup: Arc::new(AtomicBool::new(settings.run_on_startup)),
             reset_restore: Arc::new(AtomicBool::new(false)),
+            worker_exited: Arc::new(AtomicBool::new(false)),
             restore_failures: Arc::new(AtomicU32::new(0)),
             main_windows: Arc::new(AtomicU32::new(0)),
             hidden_windows: Arc::new(AtomicU32::new(0)),
