@@ -1,10 +1,9 @@
 //! Recurrence guard for version drift.
 //!
-//! The version lives in four places. `scripts/build_release.ps1` compares only
-//! two of them and only at release-build time, and the Python side compares a
-//! different pair, so bumping one place could pass the Rust CI job and fail the
-//! Python one (exactly what happened on the v11.1.4 bump). This test checks all
-//! four against `config::VERSION` inside the `rust-core` CI job.
+//! The version lives in three places. `scripts/build_release.ps1` compares only
+//! two of them and only at release-build time, so bumping one place could
+//! pass local checks and fail the release build. This test checks all three
+//! against `config::VERSION` inside the `rust-core` CI job.
 
 use std::fs;
 use std::path::PathBuf;
@@ -65,18 +64,6 @@ fn windows_version_resource_matches() {
             "packaging/windows_version_info.txt is missing: {needle}"
         );
     }
-}
-
-#[test]
-fn python_reference_version_matches() {
-    // tests/test_version_metadata_v11.py compares this value against the
-    // Windows resource, so a Rust-only bump fails the Python CI job.
-    let paths_py = read("legacy/python-v11/kakao_adblocker/config/paths.py");
-    let expected = format!("VERSION = \"{VERSION}\"");
-    assert!(
-        paths_py.contains(&expected),
-        "legacy/python-v11/kakao_adblocker/config/paths.py must declare {expected}"
-    );
 }
 
 #[test]

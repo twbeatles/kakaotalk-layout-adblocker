@@ -5,20 +5,28 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import sys
+import re
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 ROOT = Path(__file__).resolve().parents[1]
-LEGACY_PYTHON = ROOT / "legacy" / "python-v11"
-for path in (LEGACY_PYTHON, ROOT):
-    text = str(path)
-    if text not in sys.path:
-        sys.path.insert(0, text)
+RUST_PATHS_RS = ROOT / "rust" / "crates" / "kakao-app" / "src" / "config" / "paths.rs"
 
-from kakao_adblocker.config import UPDATE_PUBLIC_KEY_B64
-from kakao_adblocker.services import UpdateService
+
+def _read_embedded_pubkey() -> str:
+    text = RUST_PATHS_RS.read_text(encoding="utf-8")
+    match = re.search(r'pub const UPDATE_PUBLIC_KEY_B64:\s*&str\s*=\s*"([^"]+)"', text)
+    if match is None:
+        raise ValueError(f"UPDATE_PUBLIC_KEY_B64 not found in {RUST_PATHS_RS}")
+    return match.group(1)
+
+
+UPDATE_PUBLIC_KEY_B64 = _read_embedded_pubkey()
+
+
+def _canonical_payload(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = dict(document["payload"])
     signature = base64.b64decode(str(document["signature"]), validate=True)
     public = base64.b64decode(UPDATE_PUBLIC_KEY_B64, validate=True)
-    Ed25519PublicKey.from_public_bytes(public).verify(signature, UpdateService._canonical_payload(payload))
+    Ed25519PublicKey.from_public_bytes(public).verify(signature, _canonical_payload(payload))
     required = {"version", "tag", "artifact_url", "sha256", "size", "expires_at"}
     if set(payload) != required or payload["tag"] != f"v{payload['version']}":
         raise ValueError("Manifest payload fields are invalid")

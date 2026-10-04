@@ -46,3 +46,12 @@ env/
 .vscode/
 
 rust/target/
+
+# Local-only Python reference (Rust is the single tracked implementation).
+# These paths stay on disk but are not pushed to GitHub.
+legacy/
+tests/*.py
+kakaotalk_layout_adblock_v11.py
+pyrightconfig.json
+requirements.txt
+requirements-dev.txt

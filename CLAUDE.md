@@ -7,7 +7,7 @@
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
-- Python v11 참고 구현: `legacy/python-v11/` (골든 fixture/회귀 테스트용). 루트 `kakaotalk_layout_adblock_v11.py`는 사용중단 안내만 출력한다.
+- Python v11 참고 구현은 Git 추적 밖 로컬 전용(`legacy/`, untracked)이다. 골든 fixture는 `tests/fixtures/`에 그대로 추적된다.
 
 ## 광고차단 알고리즘 고정 규칙
 
@@ -30,7 +30,7 @@
 
 ## Rust 활성 런타임 동작 (아래 "핵심 모듈"의 Python 계약과 다른 지점)
 
-> 아래 "핵심 모듈" 절은 명시된 대로 **Python 참고 구현(`legacy/python-v11`)의 알고리즘 계약**이다.
+> 아래 "핵심 모듈" 절은 명시된 대로 **로컬 전용 Python 참고 구현(`legacy/python-v11`, Git 미추적)의 알고리즘 계약**이다.
 > Rust 기본 구현이 의도적으로 다르게 동작하는 지점은 다음과 같다. 혼동하지 말 것.
 
 - 설정/규칙 파손 백업 파일명은 Rust에서 `*.broken-<unix-epoch>`다. Python 계약의 `*.broken-YYYYMMDD-HHMMSS`가 아니다.
@@ -60,9 +60,9 @@
 - 소스: `rust/crates/kakao-app` (`kakao-adblock-rs`)
 - 시작프로그램(Rust): HKCU Run + `StartupApproved`. 트레이 시작 전 `Shell_TrayWnd` 대기, NIM_ADD 재시도, 실패해도 메시지 루프 유지 후 `TaskbarCreated`/타이머 재등록. `run_on_startup`이면 missing/stale/missing_target Run 명령을 현재 EXE로 복구하고, Windows가 꺼 둔 시작 앱 상태를 다시 켠다. cargo 소스 실행은 존재하는 패키지 EXE 등록을 덮어쓰지 않는다.
 - 루트 `kakaotalk_layout_adblock_v11.py`는 Rust EXE 안내만 출력하고 종료 코드 `0`
-- Python 참고 구현: `legacy/python-v11/kakao_adblocker`, 엔트리 `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
-- 정적 분석: `pyrightconfig.json` extraPaths=`legacy/python-v11`, include=`legacy/python-v11/kakao_adblocker`, `tests`
-- 권장 검증: `.\scripts\dev_check.ps1` (Python 골든) + `cd rust; cargo test --workspace` (fmt/clippy 포함)
+- Python 참고 구현: `legacy/python-v11/kakao_adblocker`, 엔트리 `legacy/python-v11/kakaotalk_layout_adblock_v11.py` (로컬 전용, Git 미추적)
+- 정적 분석: `cargo fmt --check` + `cargo clippy --all-targets --all-features -- -D warnings`
+- 권장 검증: `.\scripts\dev_check.ps1` + `cd rust; cargo test --workspace` (fmt/clippy 포함)
 - 일반 UI: named mutex `Local\KakaoTalkLayoutAdBlocker_v11`. 중복 실행은 stderr 후 종료 코드 `0`
 - `--self-check`, `--dump-tree`, `--dump-tree-series`, `--shadow`는 mutex 밖 진단 경로
 - 트레이: 차단 On/Off, 공격 모드, 시작프로그램, 복원 실패 초기화, 로그/릴리스/업데이트, 종료(restore 후)
@@ -78,8 +78,8 @@
   - `kakao-app/src/updater/` — `error` / `model` / `version` / `canonical` / `manifest`(서명 검증) / `http` / `staging`
   - `kakao-app/src/config/` — `paths` / `settings` / `storage`(self-heal I/O) / `log`(회전 라이터)
   - `kakao-app/src/lib.rs`는 컴포지션 루트(`run_with_args`)로 남고 `args` / `dialogs` / `observability` / `dump_cmd` / `startup_repair`를 추출했다. `kakao_app::{Args, should_attach_parent_console}` 공개 경로는 유지된다
-  - 소스 grep 테스트(`tests/test_release_pipeline_v11.py`의 `read_rust_module`)는 퍼사드+분할 디렉터리 전체를 읽으므로 이후 분할에도 깨지지 않는다. 구조 이동 후에는 `cargo test`뿐 아니라 `pytest`까지 돌려야 한다(CI `validate` 잡이 Rust 소스를 직접 검사함)
-- Python 참고 구현은 `legacy/python-v11/kakao_adblocker/` 아래에 있다. 아래 모듈 설명은 그 참고 구현의 알고리즘 계약이다.
+- 소스 grep 회귀(로컬 전용 `tests/test_release_pipeline_v11.py`의 `read_rust_module`, Git 미추적)는 퍼사드+분할 디렉터리 전체를 읽으므로 이후 분할에도 깨지지 않는다. 구조 이동 후에는 `cargo test`로 검증한다(CI `rust-core` 잡이 fmt/clippy/test를 검사함)
+- Python 참고 구현(로컬 전용, Git 미추적)은 `legacy/python-v11/kakao_adblocker/` 아래에 있다. 아래 모듈 설명은 그 참고 구현의 알고리즘 계약이다.
 
 - `kakao_adblocker/app/`
   - `main`, CLI parser, self-check, startup trace helper
@@ -182,17 +182,11 @@
 
 ## 빌드 메모
 
-- `kakaotalk_adblock.spec`는 런타임 핵심 모듈(`kakao_adblocker.app`, `kakao_adblocker.config`, `kakao_adblocker.event_engine`, `kakao_adblocker.layout_engine`, `kakao_adblocker.logging_setup`, `kakao_adblocker.services`, `kakao_adblocker.ui`, `kakao_adblocker.win32_api`, `pystray`, `PIL`, `tkinter`)을 `hiddenimports`로 명시하고 `collect_submodules("pystray"|"PIL")` 및 packageized `app/config/event_engine` 하위 모듈 수집을 함께 사용해 onefile 누락을 방지
-- 타입 경계 모듈 `kakao_adblocker.protocols`도 `hiddenimports`에 포함되어 onefile 모듈 누락 가능성을 줄임
-- 패키지 루트 `kakao_adblocker`도 `hiddenimports`에 포함되어 lazy export 패키지 접근 경로를 고정
-- `pywinauto`, `comtypes`는 active v11 런타임 바깥의 legacy/UIA 의존성이므로 `.spec`의 `excludes`로 유지
-- single-instance mutex, 동적 Win32 text-result, Run command parsing은 stdlib `ctypes` 기반 kernel32/user32/shell32 호출이므로 `.spec` hidden import 추가 대상이 아님
-- popup parity(`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback 복원 추적은 기존 `config/event_engine/win32_api` 내부 구현이라 추가 PyInstaller hook 없이 현재 spec으로 포장 가능
-- empty `EVA_ChildWindow` subtree custom-scroll guard는 tick-local `event_engine` 내부 구현이라 추가 hidden import 없이 현재 spec으로 유지
+- Rust 패키징은 `scripts/build_release.ps1`이 `cargo build --release`로 EXE 2종(`kakao-adblock-rs`, `kakao-updater`)을 만들고 `packaging/windows_version_info.txt` 리소스와 아이콘을 포함한다. PyInstaller `.spec` 기반 패키징은 과거 Python 시절 것으로 현재 추적 대상이 아니다.
 - `scripts/build_release.ps1`는 빌드 시작 시 `VERSION`과 `packaging/windows_version_info.txt` 동기화를 검증하고, 기본값으로 built EXE에 `--self-check --strict-self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
 - interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 60초 timeout으로 멈춤을 차단하며, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
 - `-StrictStartupSmoke`는 interactive startup smoke가 실제 수행된 경우에만 tray unavailable / tray start warning을 빌드 실패로 승격한다
-- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 pyright, pytest, self-check JSON, no-sign packaging build와 packaged strict self-check를 검증하고, interactive tray/startup smoke는 강제하지 않는다
+- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 self-check JSON, no-sign packaging build와 packaged strict self-check를 검증하고, interactive tray/startup smoke는 강제하지 않는다
 
 ## 동작 규칙
 
@@ -205,7 +199,7 @@
 7. 비메인 top-level 창의 descendant(depth<=`popup_search_depth`)가 `AdFitWebView` 등 `popup_ad_classes`에 매치되더라도 기본값에서는 empty host title 또는 allowlist match일 때만 host와 matched popup descendant만 close/hide/zero-size 처리
 8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영하며, 소스 모드 자동 동기화는 유효한 패키지 EXE Run 등록을 덮어쓰지 않는다
 9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
-10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/Run 등록 명령/`tkinter/Tk`/트레이 import 환경 진단만 수행하며, 기본 모드의 트레이 import 실패는 optional이고 `--strict-self-check`에서는 core로 취급
+10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/Run 등록 명령/트레이 환경 진단만 수행하며, 기본 모드의 트레이 경고는 optional이고 `--strict-self-check`에서는 core로 취급
 11. 일반 UI 실행은 named mutex로 단일 인스턴스만 허용하고, self-check/dump 계열 진단 명령은 mutex 밖에서 실행
 12. Win32 text read failure/unknown popup host는 empty title로 간주하지 않고 popup dismiss guard blocked로 처리
 13. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출
@@ -218,10 +212,10 @@
 
 ## 레거시 보관
 
-- Python v11 참고 구현: `legacy/python-v11/`
-- 원본 모놀리식: `legacy/kakao_adblocker/legacy.py`
-- deprecated 엔트리포인트: `legacy/카카오톡 광고제거 v10.0.py`
-- 활성 런타임 판단은 `rust/`, `tests/fixtures/` 범위로 좁힌다. Python 알고리즘 회귀는 `legacy/python-v11` + `tests/`
+- Python v11 참고 구현: `legacy/python-v11/` (로컬 전용, Git 미추적)
+- 원본 모놀리식: `legacy/kakao_adblocker/legacy.py` (로컬 전용, Git 미추적)
+- deprecated 엔트리포인트: `legacy/카카오톡 광고제거 v10.0.py` (로컬 전용, Git 미추적)
+- 활성 런타임 판단은 `rust/`, `tests/fixtures/` 범위로 좁힌다. Python 알고리즘 회귀는 로컬 `legacy/python-v11` + `tests/*.py` (Git 미추적)
 - CodeGraph는 `legacy/` symbol을 노출할 수 있으므로 기본 구현은 Rust로 해석한다
 
 <!-- SPECKIT-AGENT-GUIDE:START -->
@@ -236,7 +230,7 @@
 - **프로젝트**: `kakaotalk-layout-adblocker`
 - **Spec Kit 초기화**: `.specify/ 있음`
 - **에이전트 스킬**: Grok=True, Claude=True, Codex/Agy(.agents)=True
-- **활성 기능**: 기본 구현은 Rust `kakao-app`. Python v11은 `legacy/python-v11`. 계약 문서는 `kakaotalk_rust_migration_plan.md`와 `docs/superpowers/plans/2026-09-02-rust-native-remaining.md`
+- **활성 기능**: 기본 구현은 Rust `kakao-app`. Python v11은 로컬 전용(`legacy/`, Git 미추적). 계약 문서는 `README.md`·`CLAUDE.md`·`CHANGELOG.md`
 
 ### 에이전트가 먼저 읽을 파일
 

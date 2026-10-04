@@ -1,29 +1,36 @@
 param(
-    [string]$PythonExe = "python",
     [switch]$RunTests
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$pytestBaseTemp = Join-Path $repoRoot ".pytest_tmp"
+$exe = Join-Path $repoRoot "dist\KakaoTalkLayoutAdBlocker_v11.exe"
 
 Push-Location $repoRoot
 try {
-    Write-Host "Running self-check..."
-    & $PythonExe "kakaotalk_layout_adblock_v11.py" --self-check
-    if ($LASTEXITCODE -ne 0) {
-        throw "--self-check failed with exit code $LASTEXITCODE"
+    if (Test-Path $exe) {
+        Write-Host "Running self-check..."
+        & $exe --self-check
+        if ($LASTEXITCODE -ne 0) {
+            throw "--self-check failed with exit code $LASTEXITCODE"
+        }
+    } else {
+        Write-Warning "Packaged EXE not found; skipping self-check. Build it with scripts/build_release.ps1 -NoSign first."
     }
 
     if ($RunTests) {
-        Write-Host "Running pytest -q --basetemp .pytest_tmp..."
-        & $PythonExe -m pytest -q --basetemp .pytest_tmp
-        if ($LASTEXITCODE -ne 0) {
-            throw "pytest failed with exit code $LASTEXITCODE"
+        Write-Host "Running cargo test (--workspace)..."
+        Push-Location (Join-Path $repoRoot "rust")
+        try {
+            cargo test --workspace
+            if ($LASTEXITCODE -ne 0) {
+                throw "cargo test failed with exit code $LASTEXITCODE"
+            }
+        } finally {
+            Pop-Location
         }
     }
-
     Write-Host ""
     Write-Host "Manual smoke checklist:"
     Write-Host "1. Tray visibility: start with --minimized and verify the tray icon is actually visible without opening the main window."
@@ -38,14 +45,7 @@ try {
     Write-Host "10. Popup fallback restore: verify a popup that survives WM_CLOSE but is hidden/zero-sized is restored when blocking is turned OFF."
     Write-Host "11. Hung close handling: simulate or observe an unresponsive popup close and verify the engine reports timeout without freezing."
     Write-Host "12. Dynamic custom-scroll guard: verify an empty EVA child is not closed if a custom scroll child appears between ticks."
-    Write-Host "13. Strict self-check: run --self-check --strict-self-check --json in release validation and verify tray import failure is core."
+    Write-Host "13. Strict self-check: run --self-check --strict-self-check --json and verify core warnings fail the check."
 } finally {
-    if (Test-Path $pytestBaseTemp) {
-        try {
-            Remove-Item -Recurse -Force $pytestBaseTemp
-        } catch {
-            Write-Warning "Failed to clean ${pytestBaseTemp}: $($_.Exception.Message)"
-        }
-    }
     Pop-Location
 }

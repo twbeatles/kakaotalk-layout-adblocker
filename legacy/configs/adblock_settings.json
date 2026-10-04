@@ -1,9 +1,0 @@
-{
-    "auto_start": false,
-    "minimize_to_tray": true,
-    "realtime_protection": true,
-    "hide_layout": true,
-    "block_adfit": true,
-    "adfit_update_interval_sec": 10,
-    "theme": "light"
-}

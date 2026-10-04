@@ -2,7 +2,7 @@
 
 This is the **default** KakaoTalk Layout AdBlocker implementation.
 
-Python v11 is archived at `../legacy/python-v11/` and kept for golden/regression tests.
+Legacy Python v11 reference is local-only (`legacy/`, not tracked); golden fixtures stay tracked under `../tests/fixtures/`.
 
 ## Status
 
@@ -13,14 +13,13 @@ Python v11 is archived at `../legacy/python-v11/` and kept for golden/regression
 
 ## Docs
 
-- Full contract: [`../kakaotalk_rust_migration_plan.md`](../kakaotalk_rust_migration_plan.md)
-- **Next agent starts here:** [`../docs/superpowers/plans/2026-09-02-rust-native-remaining.md`](../docs/superpowers/plans/2026-09-02-rust-native-remaining.md)
+- Overview: [`../README.md`](../README.md)
+- Changelog: [`../CHANGELOG.md`](../CHANGELOG.md)
 - Algorithm freeze: [`../CLAUDE.md`](../CLAUDE.md)
 
 ## Commands
 
 ```powershell
-python -m kakao_adblocker.dev.export_fixture_decisions --check
 cd rust
 cargo test --workspace
 cargo clippy --all-targets --all-features -- -D warnings

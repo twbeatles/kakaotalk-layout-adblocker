@@ -3,7 +3,7 @@
 ## Project Snapshot
 
 - Platform: Windows
-- Runtime: Rust native (`kakao-adblock-rs`); Python v11 reference in `legacy/python-v11`
+- Runtime: Rust native (`kakao-adblock-rs`); Python v11 reference is local-only (`legacy/`, not tracked)
 - Version line: `v11`
 - Scope: Layout-only ad blocking (no hosts, no DNS flush, no AdFit registry writes)
 - Non-Windows execution: fail-fast with message and exit code `2`
@@ -30,21 +30,21 @@
 
 - Main binary: `dist/KakaoTalkLayoutAdBlocker_v11.exe` (`rust/crates/kakao-app`)
 - HKCU Run startup: wait for `Shell_TrayWnd`, retry `NIM_ADD`, keep the tray message loop if the icon is still missing, then re-add on `TaskbarCreated`/timer. Repair missing/stale/missing-target Run commands and re-enable `StartupApproved` when `run_on_startup` is set.
-- Python reference: `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
-- Legacy script: `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
+- Python reference (local-only, not tracked): `legacy/python-v11/kakaotalk_layout_adblock_v11.py`
+- Legacy script (local-only, not tracked): `legacy/카카오톡 광고제거 v10.0.py` (deprecated notice only)
 - `--dump-tree` runs in a lightweight path without UI/tray module import. Child trees go in `windows`; owned popup ad hosts go in `owned_popups`. Graph child edges are direct children (`GetParent`), not flattened `EnumChildWindows` descendants.
 - `--self-check` runs diagnostics only (no UI/tray/engine start)
 - default `--self-check` treats tray import failure as optional; `--strict-self-check` upgrades it to core failure for packaging/release validation
 - `--self-check --json` emits structured diagnostics, and packaged smoke can persist the same payload via an internal report path
-- normal UI launch is single-instance guarded by the Windows named mutex `Local\KakaoTalkLayoutAdBlocker_v11`; duplicate UI launches print an already-running message to stderr and exit `0` before Tk/tray/engine startup
+- normal UI launch is single-instance guarded by the Windows named mutex `Local\KakaoTalkLayoutAdBlocker_v11`; duplicate UI launches print an already-running message to stderr and exit `0` before tray/engine startup
 - `--self-check`, `--dump-tree`, and `--dump-tree-series` remain diagnostic paths and do not acquire the single-instance mutex
 - dump/report/startup-trace write failures return stderr plus exit `1`; `--dump-series-duration-ms` is capped at `10000` and `--dump-series-interval-ms` is floored at `10`
-- package `kakao_adblocker` exports are lazy-resolved via `__getattr__`
-- static analysis baseline is fixed by root `pyrightconfig.json`; active scope is `kakao_adblocker`, `tests`, and `kakaotalk_layout_adblock_v11.py`
-- preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs format/clippy/pyright only)
-- `scripts/dev_check.ps1` covers Rust `fmt --check`, `clippy`, `cargo test` alongside Python `pyright` and `pytest`, ensuring local checks match `windows-ci.yml`
+- legacy `kakao_adblocker` Python package exports (local-only, not tracked) were lazy-resolved via `__getattr__`
+- static analysis is `cargo fmt --check` + `cargo clippy --all-targets --all-features -- -D warnings`
+- preferred local verification entrypoint is `.\scripts\dev_check.ps1` (`-SkipTests` runs format/clippy only)
+- `scripts/dev_check.ps1` covers Rust `fmt --check`, `clippy`, `cargo test`, ensuring local checks match `windows-ci.yml`
 - `.githooks/pre-commit` enforces `.\scripts\dev_check.ps1 -SkipTests` to prevent CI failures from slipping into commits
-- `scripts/dev_check.ps1` / `scripts/smoke_check.ps1` use `--basetemp .pytest_tmp` and clean the workspace-local pytest temp directory when possible
+- Python tests and pytest temp state are local-only and no longer part of CI
 
 ## Architecture
 
@@ -187,15 +187,15 @@
 - single-instance mutex handling, dynamic Win32 text-result reads, and Startup Run command parsing are stdlib `ctypes` calls into kernel32/user32/shell32, so they do not require additional PyInstaller hidden imports.
 - popup parity (`popup_ad_classes` / `AdFitWebView`), `SendMessageTimeoutW` close timeout, popup fallback restore tracking, popup host guards, and logging fallback/probe stay inside existing modules, so no extra hidden-import or hook change is required.
 - the empty `EVA_ChildWindow` subtree custom-scroll guard remains tick-local inside `event_engine`, so current hidden-import coverage remains sufficient.
-- `--self-check` / `--strict-self-check` exercise dynamic Tk diagnostics and logging bootstrap probe, so explicit `tkinter` hidden imports keep onefile packaging deterministic.
-- `scripts/build_release.ps1` verifies `kakao_adblocker.config.VERSION` matches `packaging/windows_version_info.txt`, then runs a packaged `--self-check --strict-self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
+- `--self-check` / `--strict-self-check` exercise native Win32 diagnostics (registry, Run command health, process enumeration) and the logging bootstrap probe; `core` warnings fail packaging/release validation.
+- `scripts/build_release.ps1` verifies Rust `config::VERSION` (`rust/crates/kakao-app/src/config/paths.rs`) matches `packaging/windows_version_info.txt`, then runs a packaged `--self-check --strict-self-check --json` smoke by default after building with a temporary `%APPDATA%`; only `core` failures fail the build.
 - when an interactive shell is available, `scripts/build_release.ps1` also runs a packaged startup smoke with `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...`; the smoke is bounded by a 60-second timeout and kills the child process on timeout. Otherwise it records a skipped startup smoke and continues.
 - `-StrictStartupSmoke` only upgrades tray-unavailable / tray-start-warning startup smoke results to a build failure when the interactive startup smoke actually ran.
 
 ## CI
 
 - GitHub Actions workflow `.github/workflows/windows-ci.yml` runs on `push` and `pull_request` with hosted `windows-latest`.
-- CI covers `python -m pyright`, `pytest -q --basetemp .pytest_tmp`, `python kakaotalk_layout_adblock_v11.py --self-check --json`, and `scripts/build_release.ps1 -NoSign`.
+- CI covers the built EXE packaged self-check (`--self-check --json`) and `scripts/build_release.ps1 -NoSign`.
 - Hosted CI runs the built EXE packaged strict self-check through the release script. Interactive tray/startup validation is still skipped by the release script's non-interactive/CI detection and remains a local/manual or release-host check.
 
 ## Legacy Archive
@@ -208,8 +208,8 @@ Legacy code/assets were moved under `legacy/`:
 - `legacy/configs/*`
 - `legacy/scripts/*`
 - `legacy/카카오톡 광고제거 v10.0.py`
-- archived legacy files stay outside the active repo-wide `pyright` scope; existing per-file directives remain for ad hoc maintenance
-- CodeGraph broad queries can still surface `legacy/` symbols, so active v11 analysis should be narrowed to `kakao_adblocker/`, `tests/`, and `kakaotalk_layout_adblock_v11.py`
+- archived legacy files are local-only and outside Git tracking; existing per-file directives remain for ad hoc local maintenance
+- CodeGraph broad queries can still surface local `legacy/` symbols, so active v11 analysis should be narrowed to `rust/` and `tests/fixtures/`
 
 <!-- SPECKIT-AGENT-GUIDE:START -->
 
