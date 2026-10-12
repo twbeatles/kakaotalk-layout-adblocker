@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-10-12T00:00:00",
+  "pids": [42],
+  "windows": [
+    {
+      "hwnd": 1600,
+      "class": "EVA_Window_Dblclk",
+      "text": "카카오톡",
+      "pid": 42,
+      "visible": true,
+      "rect": [0, 0, 500, 700],
+      "children": [
+        {
+          "hwnd": 1601,
+          "class": "EVA_ChildWindow",
+          "text": "OnlineMainView_0x1",
+          "pid": 42,
+          "visible": true,
+          "rect": [0, 0, 500, 669],
+          "children": []
+        }
+      ]
+    },
+    {
+      "hwnd": 1700,
+      "class": "EVA_Window",
+      "text": "",
+      "pid": 42,
+      "visible": true,
+      "rect": [10, 10, 410, 410],
+      "children": [
+        {
+          "hwnd": 1701,
+          "class": "Chrome_WidgetWin_1",
+          "text": "Kakao Chrome Legacy Window Sale",
+          "pid": 42,
+          "visible": true,
+          "rect": [10, 10, 410, 410],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

@@ -28,12 +28,13 @@ impl Rect {
         }
     }
 
+    /// Saturating: hostile or corrupt coordinates must never panic the evaluator.
     pub fn width(self) -> i32 {
-        self.right - self.left
+        self.right.saturating_sub(self.left)
     }
 
     pub fn height(self) -> i32 {
-        self.bottom - self.top
+        self.bottom.saturating_sub(self.top)
     }
 }
 

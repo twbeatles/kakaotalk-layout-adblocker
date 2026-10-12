@@ -30,6 +30,12 @@ jobs:
         run: |
           $version = (Select-String -Path rust/crates/kakao-app/src/config/paths.rs -Pattern 'pub const VERSION: &str = "([^"]+)"').Matches[0].Groups[1].Value
           if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME must match application version v$version" }
+      - name: Test workspace gate
+        working-directory: rust
+        # A tagged release must never ship code that fails the workspace
+        # contract/transition suite. windows-ci already runs this per-PR; the
+        # tag pipeline re-runs it so a tag on an untested commit is blocked.
+        run: cargo test --workspace
       - name: Build release executable
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign

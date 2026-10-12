@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-10-12T00:00:00",
+  "pids": [42],
+  "windows": [
+    {
+      "hwnd": 2100,
+      "class": "EVA_Window_Dblclk",
+      "text": "카카오톡",
+      "pid": 42,
+      "visible": true,
+      "rect": [0, 0, 500, 700],
+      "children": [
+        {
+          "hwnd": 2101,
+          "class": "EVA_ChildWindow",
+          "text": "OnlineMainView_0x1",
+          "pid": 42,
+          "visible": true,
+          "rect": [0, 0, 500, 669],
+          "children": []
+        }
+      ]
+    },
+    {
+      "hwnd": 2200,
+      "class": "EVA_Window",
+      "text": "사진 보기",
+      "pid": 42,
+      "visible": true,
+      "rect": [50, 50, 350, 210],
+      "children": [
+        {
+          "hwnd": 2201,
+          "class": "AdFitWebView",
+          "text": "",
+          "pid": 42,
+          "visible": true,
+          "rect": [50, 50, 350, 210],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

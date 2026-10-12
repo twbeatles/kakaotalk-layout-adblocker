@@ -127,6 +127,31 @@ pub(super) fn store_update(
     (state.clone(), confirmed)
 }
 
+/// Single-owner variant of `store_update`: at most one branch may record a
+/// verdict for a window per tick. A confirmation (`matched`) always goes
+/// through, but miss-tracking re-stores yield to a verdict already recorded
+/// this tick. Without this, a later branch storing `none` kept wiping the
+/// streak an earlier branch had just recorded — the empty-EVA close could
+/// never confirm under `aggressive_mode`, and the diagnostic preview
+/// disagreed with the applied states.
+pub(super) fn store_once(
+    store: &mut HashMap<WindowIdentity, CandidateState>,
+    touched: &mut HashSet<WindowIdentity>,
+    identity: WindowIdentity,
+    decision: &AdDecision,
+    ticks: i64,
+    track: bool,
+) -> Option<(CandidateState, bool)> {
+    if decision.matched() {
+        touched.insert(identity.clone());
+        Some(store_update(store, identity, decision, ticks))
+    } else if track && touched.insert(identity.clone()) {
+        Some(store_update(store, identity, decision, ticks))
+    } else {
+        None
+    }
+}
+
 pub(super) fn inspect_candidates(
     graph: &WindowGraph,
     settings: &LayoutSettings,
@@ -137,6 +162,7 @@ pub(super) fn inspect_candidates(
     preview_states: &mut HashMap<WindowIdentity, CandidateState>,
 ) -> Vec<CandidatePayload> {
     let mut payloads = Vec::new();
+    let mut touched = HashSet::new();
     let ticks = rules.weak_signal_confirm_ticks;
 
     for &wnd in confirmed_main {
@@ -216,12 +242,17 @@ pub(super) fn inspect_candidates(
                     has_custom_scroll,
                     main_window_has_ad_signal,
                 );
-                if close_decision.matched()
-                    || preview_states.contains_key(&identity)
-                    || close_decision.signals.has_relevant_signal()
-                {
-                    let (state, confirmed) =
-                        store_update(preview_states, identity.clone(), &close_decision, ticks);
+                let track_close = !close_decision.matched()
+                    && (preview_states.contains_key(&identity)
+                        || close_decision.signals.has_relevant_signal());
+                if let Some((state, confirmed)) = store_once(
+                    preview_states,
+                    &mut touched,
+                    identity.clone(),
+                    &close_decision,
+                    ticks,
+                    track_close,
+                ) {
                     payloads.push(candidate_payload(
                         &identity,
                         &close_decision,
@@ -234,16 +265,17 @@ pub(super) fn inspect_candidates(
             if !settings.aggressive_mode || child_rect.is_none() {
                 continue;
             }
-            if aggressive_decision.matched()
-                || preview_states.contains_key(&identity)
-                || aggressive_decision.signals.has_relevant_signal()
-            {
-                let (state, confirmed) = store_update(
-                    preview_states,
-                    identity.clone(),
-                    &aggressive_decision,
-                    ticks,
-                );
+            let track_aggressive = !aggressive_decision.matched()
+                && (preview_states.contains_key(&identity)
+                    || aggressive_decision.signals.has_relevant_signal());
+            if let Some((state, confirmed)) = store_once(
+                preview_states,
+                &mut touched,
+                identity.clone(),
+                &aggressive_decision,
+                ticks,
+                track_aggressive,
+            ) {
                 payloads.push(candidate_payload(
                     &identity,
                     &aggressive_decision,
@@ -261,12 +293,17 @@ pub(super) fn inspect_candidates(
         let identity = node.identity();
         let legacy_kind = legacy_signature_kind(graph, rules, wnd);
         let legacy_decision = legacy_hide_decision(&legacy_kind);
-        if legacy_decision.matched()
-            || preview_states.contains_key(&identity)
-            || legacy_decision.signals.has_relevant_signal()
-        {
-            let (state, confirmed) =
-                store_update(preview_states, identity.clone(), &legacy_decision, ticks);
+        let track_legacy = !legacy_decision.matched()
+            && (preview_states.contains_key(&identity)
+                || legacy_decision.signals.has_relevant_signal());
+        if let Some((state, confirmed)) = store_once(
+            preview_states,
+            &mut touched,
+            identity.clone(),
+            &legacy_decision,
+            ticks,
+            track_legacy,
+        ) {
             payloads.push(candidate_payload(
                 &identity,
                 &legacy_decision,

@@ -24,7 +24,7 @@ pub use api::{
     Win32Api, SMTO_ABORTIFHUNG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
     SW_SHOW, WM_CLOSE,
 };
-pub use fake::FakeWin32;
+pub use fake::{ApiCall, CloseBehavior, FakeWin32, WindowSnapshot};
 
 #[cfg(windows)]
 pub use real::RealWin32;

@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "positive_legacy_exact_strong",
+      "kind": "positive",
+      "fixture": "positives/legacy_exact_strong.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 1,
+      "expect": {
+        "required_hide": [1200],
+        "required_close": [],
+        "must_not_hide": [1100, 1101, 1201],
+        "must_not_close": [1100, 1101, 1200, 1201],
+        "must_not_zero_size": [1100, 1101, 1200, 1201]
+      },
+      "label_basis": "exact 'Chrome Legacy Window' title is a Strong legacy signal per the documented legacy-ad contract; main window and view must stay untouched",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture drafted from tests/fixtures/window_dumps/legacy_ad_surface.json structure"
+    },
+    {
+      "id": "positive_bottom_banner_with_token",
+      "kind": "positive",
+      "fixture": "positives/bottom_banner_with_token.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 1,
+      "expect": {
+        "required_hide": [1302],
+        "required_close": [],
+        "must_not_hide": [1300, 1301, 1303],
+        "must_not_close": [1300, 1301, 1302, 1303],
+        "must_not_zero_size": [1300, 1301, 1302, 1303]
+      },
+      "label_basis": "bottom geometry (h=80 in 40..260, full width, bottom-aligned) plus explicit ad token '광고' is a Strong aggressive signal",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture modeled on launch_ad_flash_banner.json with an explicit Korean ad token"
+    },
+    {
+      "id": "positive_popup_allow_empty_host",
+      "kind": "positive",
+      "fixture": "positives/popup_allow_empty_host.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 1,
+      "expect": {
+        "required_hide": [1500, 1501],
+        "required_close": [1500, 1501],
+        "must_not_hide": [1400, 1401],
+        "must_not_close": [1400, 1401],
+        "must_not_zero_size": [1400, 1401]
+      },
+      "label_basis": "empty host title passes the popup host guard, so the AdFitWebView popup (depth 1) must be dismissed: close request plus hide and zero-size fallbacks",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture modeled on popup_adfit_webview.json with an empty host title"
+    },
+    {
+      "id": "positive_weak_substring_two_ticks",
+      "kind": "positive",
+      "fixture": "positives/weak_substring_two_ticks.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 2,
+      "expect": {
+        "required_hide": [1700],
+        "pending_hide": [1700],
+        "pending_close": [],
+        "required_close": [],
+        "must_not_hide": [1600, 1601, 1701],
+        "must_not_close": [1600, 1601, 1700, 1701],
+        "must_not_zero_size": [1600, 1601, 1700, 1701]
+      },
+      "label_basis": "partial 'Chrome Legacy Window' match is a Weak signal: no hide on tick 1 (pending), hide on tick 2 per weak_signal_confirm_ticks=2",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture; oracle asserts tick-1 absence and tick-2 presence"
+    },
+    {
+      "id": "negative_photo_viewer_guarded",
+      "kind": "negative",
+      "fixture": "negatives/photo_viewer_guarded.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 3,
+      "expect": {
+        "required_hide": [],
+        "required_close": [],
+        "must_not_hide": [2100, 2101, 2200, 2201],
+        "must_not_close": [2100, 2101, 2200, 2201],
+        "must_not_zero_size": [2100, 2101, 2200, 2201]
+      },
+      "label_basis": "non-empty host title ('사진 보기') blocks the popup host guard even with an AdFitWebView child; media viewer must survive sustained ticks",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture modeled on guarded_popup_adfit_viewer.json"
+    },
+    {
+      "id": "negative_banner_without_token",
+      "kind": "negative",
+      "fixture": "negatives/banner_without_token.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 3,
+      "expect": {
+        "required_hide": [],
+        "required_close": [],
+        "must_not_hide": [2300, 2301, 2302],
+        "must_not_close": [2300, 2301, 2302],
+        "must_not_zero_size": [2300, 2301, 2302]
+      },
+      "label_basis": "bottom geometry alone is not enough with hide_bottom_banner_without_token=false (default); 'Footer Panel' carries no ad token",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture modeled on bottom_web_panel_no_token.json"
+    },
+    {
+      "id": "negative_adobe_word_boundary",
+      "kind": "negative",
+      "fixture": "negatives/adobe_word_boundary.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 3,
+      "expect": {
+        "required_hide": [],
+        "required_close": [],
+        "must_not_hide": [2400, 2401, 2402],
+        "must_not_close": [2400, 2401, 2402],
+        "must_not_zero_size": [2400, 2401, 2402]
+      },
+      "label_basis": "2-char token 'Ad' requires a word boundary: 'Adobe' must not match even at exact banner geometry",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture; geometry deliberately banner-like to isolate the token decision"
+    },
+    {
+      "id": "negative_other_pid_window",
+      "kind": "negative",
+      "fixture": "negatives/other_pid_window.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 2,
+      "expect": {
+        "required_hide": [],
+        "required_close": [],
+        "must_not_hide": [2500, 2501, 2600, 2601],
+        "must_not_close": [2500, 2501, 2600, 2601],
+        "must_not_zero_size": [2500, 2501, 2600, 2601]
+      },
+      "label_basis": "windows outside the KakaoTalk PID set are never candidates, even with a legacy ad signature",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture; foreign window uses pid 9999 outside pids [42]"
+    },
+    {
+      "id": "negative_empty_eva_no_signal",
+      "kind": "negative",
+      "fixture": "negatives/empty_eva_no_signal.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 3,
+      "expect": {
+        "required_hide": [],
+        "required_close": [],
+        "must_not_hide": [2700, 2701, 2702],
+        "must_not_close": [2700, 2701, 2702],
+        "must_not_zero_size": [2700, 2701, 2702]
+      },
+      "label_basis": "empty EVA child without any ad signal must not be closed (close_empty_eva_child_requires_ad_signal default true)",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture modeled on empty_eva_child_no_ad_signal.json"
+    },
+    {
+      "id": "positive_empty_eva_close_with_signal",
+      "kind": "positive",
+      "fixture": "positives/empty_eva_close_with_signal.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 2,
+      "expect": {
+        "required_hide": [2803],
+        "required_close": [2802],
+        "must_not_hide": [2800, 2801, 2802, 2804],
+        "must_not_close": [2800, 2801, 2803, 2804],
+        "must_not_zero_size": [2800, 2801, 2802, 2803, 2804],
+        "pending_hide": [],
+        "pending_close": [2802]
+      },
+      "label_basis": "empty EVA child plus a real ad signal elsewhere in the main window is a Weak close: silent tick 1, close tick 2, while the banner itself hides Strong on tick 1",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture; first end-to-end coverage of the empty-EVA close path"
+    },
+    {
+      "id": "negative_deep_signal_beyond_limits",
+      "kind": "negative",
+      "fixture": "negatives/deep_signal_beyond_limits.json",
+      "settings": {"enabled": true, "aggressive_mode": true},
+      "rules_overrides": {},
+      "ticks": 2,
+      "expect": {
+        "required_hide": [],
+        "required_close": [],
+        "must_not_hide": [4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010, 4011, 4100, 4101, 4102, 4103, 4104, 4105, 4106, 4107, 4108, 4109],
+        "must_not_close": [4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010, 4011, 4100, 4101, 4102, 4103, 4104, 4105, 4106, 4107, 4108, 4109],
+        "must_not_zero_size": [4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010, 4011, 4100, 4101, 4102, 4103, 4104, 4105, 4106, 4107, 4108, 4109],
+        "pending_hide": [],
+        "pending_close": []
+      },
+      "label_basis": "ad signals deeper than the documented search depth (8) are out of reach: legacy text at depth 9 and a banner token at depth 9 change nothing on any tick",
+      "reviewed_by": "human (test author, 2026-10-12)",
+      "reviewed_at": "2026-10-12",
+      "capture_note": "synthetic fixture with 9-edge descendant chains; pins the depth limit end to end"
+    }
+  ]
+}

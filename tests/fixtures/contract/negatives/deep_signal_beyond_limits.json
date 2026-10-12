@@ -1,0 +1,227 @@
+{
+  "timestamp": "2026-10-12T00:00:00",
+  "pids": [
+    42
+  ],
+  "windows": [
+    {
+      "hwnd": 4000,
+      "class": "EVA_Window_Dblclk",
+      "text": "카카오톡",
+      "pid": 42,
+      "visible": true,
+      "rect": [
+        0,
+        0,
+        500,
+        700
+      ],
+      "children": [
+        {
+          "hwnd": 4001,
+          "class": "EVA_ChildWindow",
+          "text": "OnlineMainView_0x1",
+          "pid": 42,
+          "visible": true,
+          "rect": [
+            0,
+            0,
+            500,
+            669
+          ],
+          "children": []
+        },
+        {
+          "hwnd": 4002,
+          "class": "Chrome_WidgetWin_1",
+          "text": "",
+          "pid": 42,
+          "visible": true,
+          "rect": [
+            0,
+            620,
+            500,
+            700
+          ],
+          "children": [
+            {
+              "hwnd": 4003,
+              "class": "Pane",
+              "text": "",
+              "pid": 42,
+              "visible": true,
+              "children": [
+                {
+                  "hwnd": 4004,
+                  "class": "Pane",
+                  "text": "",
+                  "pid": 42,
+                  "visible": true,
+                  "children": [
+                    {
+                      "hwnd": 4005,
+                      "class": "Pane",
+                      "text": "",
+                      "pid": 42,
+                      "visible": true,
+                      "children": [
+                        {
+                          "hwnd": 4006,
+                          "class": "Pane",
+                          "text": "",
+                          "pid": 42,
+                          "visible": true,
+                          "children": [
+                            {
+                              "hwnd": 4007,
+                              "class": "Pane",
+                              "text": "",
+                              "pid": 42,
+                              "visible": true,
+                              "children": [
+                                {
+                                  "hwnd": 4008,
+                                  "class": "Pane",
+                                  "text": "",
+                                  "pid": 42,
+                                  "visible": true,
+                                  "children": [
+                                    {
+                                      "hwnd": 4009,
+                                      "class": "Pane",
+                                      "text": "",
+                                      "pid": 42,
+                                      "visible": true,
+                                      "children": [
+                                        {
+                                          "hwnd": 4010,
+                                          "class": "Pane",
+                                          "text": "",
+                                          "pid": 42,
+                                          "visible": true,
+                                          "children": [
+                                            {
+                                              "hwnd": 4011,
+                                              "class": "Pane",
+                                              "text": "광고",
+                                              "pid": 42,
+                                              "visible": true,
+                                              "children": []
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "hwnd": 4100,
+      "class": "EVA_Window",
+      "text": "",
+      "pid": 42,
+      "visible": true,
+      "rect": [
+        10,
+        10,
+        410,
+        410
+      ],
+      "children": [
+        {
+          "hwnd": 4101,
+          "class": "Pane",
+          "text": "",
+          "pid": 42,
+          "visible": true,
+          "children": [
+            {
+              "hwnd": 4102,
+              "class": "Pane",
+              "text": "",
+              "pid": 42,
+              "visible": true,
+              "children": [
+                {
+                  "hwnd": 4103,
+                  "class": "Pane",
+                  "text": "",
+                  "pid": 42,
+                  "visible": true,
+                  "children": [
+                    {
+                      "hwnd": 4104,
+                      "class": "Pane",
+                      "text": "",
+                      "pid": 42,
+                      "visible": true,
+                      "children": [
+                        {
+                          "hwnd": 4105,
+                          "class": "Pane",
+                          "text": "",
+                          "pid": 42,
+                          "visible": true,
+                          "children": [
+                            {
+                              "hwnd": 4106,
+                              "class": "Pane",
+                              "text": "",
+                              "pid": 42,
+                              "visible": true,
+                              "children": [
+                                {
+                                  "hwnd": 4107,
+                                  "class": "Pane",
+                                  "text": "",
+                                  "pid": 42,
+                                  "visible": true,
+                                  "children": [
+                                    {
+                                      "hwnd": 4108,
+                                      "class": "Pane",
+                                      "text": "",
+                                      "pid": 42,
+                                      "visible": true,
+                                      "children": [
+                                        {
+                                          "hwnd": 4109,
+                                          "class": "Pane",
+                                          "text": "Chrome Legacy Window",
+                                          "pid": 42,
+                                          "visible": true,
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

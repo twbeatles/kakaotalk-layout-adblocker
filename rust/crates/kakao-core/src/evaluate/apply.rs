@@ -10,7 +10,7 @@ use crate::signals::{
     subtree_contains_ad_token,
 };
 
-use super::inspect::{collect_top_level, store_update};
+use super::inspect::{collect_top_level, store_once, store_update};
 use super::mutation_log::MutationLog;
 
 pub(super) fn apply_once(
@@ -23,6 +23,7 @@ pub(super) fn apply_once(
     states: &mut HashMap<WindowIdentity, CandidateState>,
 ) -> MutationLog {
     let mut log = MutationLog::new(graph);
+    let mut touched = HashSet::new();
     let ticks = rules.weak_signal_confirm_ticks;
     let kakao_pids: HashSet<i64> = graph.pids.iter().copied().collect();
 
@@ -107,14 +108,20 @@ pub(super) fn apply_once(
                     has_custom_scroll,
                     main_window_has_ad_signal,
                 );
-                if close_decision.matched() || states.contains_key(&identity) {
-                    let (_state, close_confirmed) =
-                        store_update(states, identity.clone(), &close_decision, ticks);
+                let track_close = !close_decision.matched()
+                    && (states.contains_key(&identity)
+                        || close_decision.signals.has_relevant_signal());
+                if let Some((_state, close_confirmed)) = store_once(
+                    states,
+                    &mut touched,
+                    identity.clone(),
+                    &close_decision,
+                    ticks,
+                    track_close,
+                ) {
                     if close_confirmed {
                         log.send_close(child);
                     }
-                } else if close_decision.signals.has_relevant_signal() {
-                    store_update(states, identity.clone(), &close_decision, ticks);
                 }
             }
 
@@ -128,9 +135,15 @@ pub(super) fn apply_once(
             if !settings.aggressive_mode || child_rect.is_none() {
                 continue;
             }
-            if aggressive_decision.matched() || states.contains_key(&identity) {
-                let (_state, aggressive_confirmed) =
-                    store_update(states, identity.clone(), &aggressive_decision, ticks);
+            let track_aggressive = !aggressive_decision.matched() && states.contains_key(&identity);
+            if let Some((_state, aggressive_confirmed)) = store_once(
+                states,
+                &mut touched,
+                identity.clone(),
+                &aggressive_decision,
+                ticks,
+                track_aggressive,
+            ) {
                 if aggressive_confirmed
                     && aggressive_decision.action == crate::model::ActionKind::Hide
                 {
@@ -151,9 +164,15 @@ pub(super) fn apply_once(
         let identity = node.identity();
         let legacy_kind = legacy_signature_kind(graph, rules, *wnd);
         let legacy_decision = legacy_hide_decision(&legacy_kind);
-        if legacy_decision.matched() || states.contains_key(&identity) {
-            let (_state, legacy_confirmed) =
-                store_update(states, identity, &legacy_decision, ticks);
+        let track_legacy = !legacy_decision.matched() && states.contains_key(&identity);
+        if let Some((_state, legacy_confirmed)) = store_once(
+            states,
+            &mut touched,
+            identity,
+            &legacy_decision,
+            ticks,
+            track_legacy,
+        ) {
             if legacy_confirmed && legacy_decision.action == crate::model::ActionKind::Hide {
                 log.hide_window(*wnd);
                 log.hidden += 1;

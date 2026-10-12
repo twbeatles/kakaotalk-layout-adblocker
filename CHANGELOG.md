@@ -1,5 +1,24 @@
 # Changelog
 
+## 11.1.7 - 2026-10-12
+
+테스트 견고화 + 실기 검증 릴리즈. 광고 판정 규칙(토큰·기하·가드)은 바꾸지 않았고,
+아래 2건의 실제 결함을 최소 수정했다. 실기(카카오톡 26.8.2.5324)에서 광고 차단·복원을 확인.
+
+### 수정
+- **empty-EVA close 경로 사망(ST-01)**: aggressive ON(기본값)에서 빈 EVA 자식의 Weak close가
+  절대 확정되지 않았다. 한 tick 안에서 close 분기가 기록한 streak를 뒤이은 aggressive 분기가
+  `none`으로 덮어쓴 것이 원인. `store_once`(tick당 한 창은 한 번만 기록, 확정은 항상 통과)로
+  수정했고, 기존 golden 10쌍은 바이트 단위로 유지된다.
+- **`Rect` 극단 좌표 panic(FZ-01)**: `width/height`의 뺄셈 오버플로우를 `saturating_sub`으로 수정.
+
+### 테스트
+- 독립 contract oracle 11건, 규칙 경계 16건, 엔진 상태전이 20건, 결정론적 퍼즈 5건 추가
+  (114 → 157 통과). FakeWin32에 WM_CLOSE 4경로·호출 로그·텍스트 주입을 추가.
+- `cargo-mutants` 3차 인증: 244건 중 235 검출·실질 생존 0건.
+- 실측: 카카오톡 26.8.2.5324 / Win11 26300에서 owned 팝업 광고 차단·종료 복원 확인
+  (`docs/testing/COMPATIBILITY_EVIDENCE.md`).
+
 ## 11.1.6 - 2026-10-04
 
 `PROJECT_AUDIT.md`(2026-10-04) 감사 지적 안정성 개선. 광고 판정 알고리즘과 골든 fixture 기대값은 바꾸지 않았다.
