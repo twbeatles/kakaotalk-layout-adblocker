@@ -32,7 +32,7 @@ cargo audit
 ```
 
 취약점이 보고되면 `cargo update -p <crate>`으로 호환 범위 안에서 올리고
-`cargo audit`을 재실행한다. `ureq 2`의 `tls` 피처처럼 간접 의존성이면
+`cargo audit`을 재실행한다. `ureq`의 TLS(rustls 기본 피처)처럼 간접 의존성이면
 `Cargo.lock`에서 유입 경로를 먼저 확인한다.
 
 ## 5. 미사용 의존성 및 `unsafe` 검증
@@ -53,6 +53,12 @@ cargo가 stderr로 진행 상황을 출력해서 PowerShell이 `NativeCommandErr
 감싸 보여줄 수 있다. 성공/실패 판정은 화면이 아니라 `$LASTEXITCODE`로 한다.
 
 ## 점검 이력
+
+- **2026-10-14**: 의존성 전면 업그레이드. major 5건(`base64→0.23`,
+  `sha2→0.11`, `ed25519-dalek→3`, `windows→0.62`, `ureq 2→3`) + 호환 31건.
+  `ureq 3`는 `updater/http.rs` 어댑터(`Config::builder`, `into_body()` 경유)로
+  대응, 타임아웃·상태코드 동작 불변. `cargo audit` 0 취약점,
+  `cargo machete` 이상 없음, `test`/`clippy`/`fmt`/`self-check(strict)` 통과.
 
 - **2026-09-25**: `rustls 0.23.43` 취약점 1건(`RUSTSEC-2026-0285`, medium,
   `ureq 2` 경유) → `0.23.45`로 업데이트. 미사용 선언 3건 제거

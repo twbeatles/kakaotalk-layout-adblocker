@@ -8,27 +8,27 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "11.1.7"
+version = "11.1.8"
 edition = "2021"
 license = "MIT"
 publish = false
 
 [workspace.dependencies]
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 hex = "0.4"
 kakao-core = { path = "crates/kakao-core" }
 kakao-win32 = { path = "crates/kakao-win32" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ureq = { version = "2", features = ["json", "tls"] }
-windows = "0.61"
+ureq = { version = "3", features = ["json"] }
+windows = "0.62"
 
 # Size/speed for the shipped EXE. `panic` stays "unwind" on purpose: the engine
 # worker contains tick panics with catch_unwind so hidden windows can still be

@@ -17,12 +17,14 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(HTTP_CONNECT_TIMEOUT)
-        .timeout_read(HTTP_READ_TIMEOUT)
-        .timeout(HTTP_TOTAL_TIMEOUT)
+    let config = ureq::config::Config::builder()
+        .timeout_connect(Some(HTTP_CONNECT_TIMEOUT))
+        .timeout_recv_response(Some(HTTP_READ_TIMEOUT))
+        .timeout_recv_body(Some(HTTP_READ_TIMEOUT))
+        .timeout_global(Some(HTTP_TOTAL_TIMEOUT))
         .user_agent(USER_AGENT)
-        .build()
+        .build();
+    ureq::Agent::new_with_config(config)
 }
 
 pub fn download_and_verify(
@@ -35,6 +37,7 @@ pub fn download_and_verify(
         .map_err(|err| UpdateError::Message(format!("업데이트 다운로드 실패: {err}")))?;
     let mut bytes = Vec::new();
     response
+        .into_body()
         .into_reader()
         .take(manifest.size.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -63,7 +66,8 @@ pub fn check_for_update() -> Result<UpdateManifest, UpdateError> {
         .get(MANIFEST_URL)
         .call()
         .map_err(|err| UpdateError::Message(format!("업데이트 정보 다운로드 실패: {err}")))?
-        .into_string()
+        .into_body()
+        .read_to_string()
         .map_err(|err| UpdateError::Message(format!("업데이트 정보 다운로드 실패: {err}")))?;
     parse_and_verify_manifest(body.as_bytes(), VERSION)
 }

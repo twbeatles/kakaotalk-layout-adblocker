@@ -30,7 +30,7 @@ jobs:
         working-directory: rust
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -76,7 +76,7 @@ jobs:
           Compress-Archive -Force -Path ..\dist\KakaoTalkLayoutAdBlocker_v11.exe,..\dist\kakao-updater.exe -DestinationPath ..\dist\KakaoTalkLayoutAdBlocker_v11.zip
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: KakaoTalkLayoutAdBlocker_v11
           path: |

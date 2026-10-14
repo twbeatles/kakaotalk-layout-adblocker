@@ -1,5 +1,19 @@
 # Changelog
 
+## 11.1.8 - 2026-10-14
+
+의존성 전면 업그레이드 릴리스. 광고 판정 규칙·알고리즘은 바꾸지 않았다.
+
+### 변경
+- **Rust major 업그레이드**: `base64 0.22→0.23`, `sha2 0.10→0.11`, `ed25519-dalek 2→3`, `windows 0.61→0.62`, `ureq 2→3` + 호환 범위 31건. `Cargo.lock` 재생성.
+- **`ureq 3` 마이그레이션**: `kakao-app/src/updater/http.rs`만 어댑터 수준으로 수정(`Config::builder` + `Agent::new_with_config`, `into_body()` 경유 읽기). 타임아웃 값·상태코드 에러 동작은 이전과 동일.
+- **CI/릴리스 환경**: `actions/checkout`·`setup-python`·`upload-artifact` → `v7`, 릴리스 Python `3.14→3.15`, `cryptography` 하한 고정(`>=50`).
+
+### 검증
+- `cargo test --workspace` 전체 통과(발행 매니페스트 서명 검증 포함), `clippy -D warnings`·`fmt --check` 통과.
+- `cargo audit` 0 취약점(168 크레이트), `cargo machete` 미사용 의존성 없음.
+- 릴리스 바이너리 `--self-check --strict-self-check --json` 통과.
+
 ## 11.1.7 - 2026-10-12
 
 테스트 견고화 + 실기 검증 릴리즈. 광고 판정 규칙(토큰·기하·가드)은 바꾸지 않았고,
