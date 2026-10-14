@@ -1,5 +1,16 @@
 # Changelog
 
+## 11.1.9 - 2026-10-14
+
+릴리스 버전 동기화. 광고 판정 규칙·알고리즘은 바꾸지 않았다.
+
+### 변경
+- **PyInstaller 스펙 추가**: `kakaotalk-pc-adblock-py.spec` 신규. Python 3.15 abi3t 환경에서 `cryptography`의 `_rust.pyd`가 링크하는 `python3t.dll`(abi3t-compat)을 자동 동봉해 frozen 실행 파일의 "DLL load failed while importing _rust"를 방지.
+- **버전 동기화**: 인앱 `VERSION`·워크스페이스 `version`·`packaging/windows_version_info.txt`·CHANGELOG를 `11.1.9`로 통일(태그 `v11.1.9`와 일치).
+
+### 검증
+- `cargo test --workspace`의 `version_sync` 4건 포함 전체 통과.
+
 ## 11.1.8 - 2026-10-14
 
 의존성 전면 업그레이드 릴리스. 광고 판정 규칙·알고리즘은 바꾸지 않았다.
