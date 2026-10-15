@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 2026-10-15
+
+- 판정/golden은 유지하고 snapshot→hide/zero-size/resize→bounded close 순서로 변경.
+- 첫 이벤트 선행 대기 제거, cadence가 있는 후속 burst, 저지연 PID 선택 옵션 추가(기본 절전 유지).
+- OFF 복원 재시도/reset/wake-up, 동일 PID hook 재설치·트레이 상태 추가.
+- 제목 없는 DEBUG latency trace, series elapsed_ms/capture_us 추가.
+- 새 헬퍼의 readiness/짧은 생존 확인 및 실패 rollback. 새 EXE 두 개 함께 배치 필요.
+- 설정 일부 필드가 잘못돼도 나머지 유효 외부 편집은 토글 저장 시 보존.
+- Win32 off-screen 느린 close·worker 전환·업데이트 자식 프로세스 회귀 테스트. 실화면·CPU·플랫폼 측정은 별도.
+
 ## 11.1.9 - 2026-10-14
 
 릴리스 버전 동기화. 광고 판정 규칙·알고리즘은 바꾸지 않았다.

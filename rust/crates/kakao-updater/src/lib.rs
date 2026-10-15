@@ -36,6 +36,8 @@ pub struct UpdateOptions {
     pub relaunch: bool,
     pub relaunch_args: Vec<String>,
     pub expected_sha256: Option<String>,
+    /// None preserves compatibility for library callers without the app protocol.
+    pub readiness_timeout: Option<Duration>,
 }
 
 fn sha256_file(path: &Path) -> std::io::Result<String> {
@@ -236,21 +238,14 @@ pub fn update_executable_with(
         // launch keeps behaving like one.
         let mut cmd = Command::new(current);
         cmd.args(&options.relaunch_args);
-        if let Err(err) = cmd.spawn() {
-            error!(%err, "failed to relaunch updated executable, attempting rollback");
-            if let Err(move_back) = std::fs::rename(current, replacement) {
-                warn!(%move_back, "could not move the new executable back to staging");
-            }
-            match std::fs::rename(&backup, current) {
-                Ok(()) => info!("rolled back to the previous executable"),
-                Err(rb_err) => {
-                    error!(%rb_err, "catastrophic: rollback after failed relaunch failed");
-                    return Err(HelperError::RollbackFailed(format!(
-                        "{err}; rollback error: {rb_err}"
-                    )));
-                }
-            }
-            return Err(HelperError::RelaunchFailed(err.to_string()));
+        if let Err(err) = launch_verified(&mut cmd, options.readiness_timeout) {
+            error!(%err, "new app did not become ready; rolling back");
+            // launch_verified reaps our child before returning an error, so
+            // Windows no longer has its image locked during rollback.
+            let _ = std::fs::remove_file(current);
+            std::fs::rename(&backup, current)
+                .map_err(|rb| HelperError::RollbackFailed(format!("{err}; {rb}")))?;
+            return Err(HelperError::RelaunchFailed(err));
         }
     }
 
@@ -258,4 +253,56 @@ pub fn update_executable_with(
     let _ = std::fs::remove_file(&backup);
     info!("self-update completed successfully");
     Ok(())
+}
+
+/// The helper owns both this directory and the child it may stop. A readiness
+/// file from another/previous process cannot acknowledge this launch.
+fn launch_verified(cmd: &mut Command, timeout: Option<Duration>) -> Result<(), String> {
+    let Some(timeout) = timeout else {
+        return cmd.spawn().map(|_| ()).map_err(|e| e.to_string());
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("kakao-ready-{}-{stamp}", std::process::id()));
+    std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("ready");
+    let result = (|| {
+        let mut child = cmd
+            .env("KAKAO_UPDATE_READY_FILE", &path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let deadline = std::time::Instant::now() + timeout;
+        let mut acknowledged: Option<std::time::Instant> = None;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return Err(format!("app exited before readiness: {status}")),
+                Ok(None) => {}
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(err.to_string());
+                }
+            }
+            if std::fs::read_to_string(&path)
+                .ok()
+                .is_some_and(|s| s == child.id().to_string())
+            {
+                let at = acknowledged.get_or_insert_with(std::time::Instant::now);
+                if at.elapsed() >= Duration::from_millis(250) {
+                    return Ok(());
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("app readiness timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    })();
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+    result
 }

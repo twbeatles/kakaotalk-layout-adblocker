@@ -13,9 +13,11 @@
 // previous public surface.
 mod apply;
 mod caches;
+mod control;
 mod flags;
 mod model;
 mod restore;
+mod runtime;
 pub mod schedule;
 mod tick;
 mod worker;

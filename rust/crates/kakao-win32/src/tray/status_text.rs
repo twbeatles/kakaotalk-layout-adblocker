@@ -11,6 +11,9 @@ pub fn status_tooltip(snapshot: &StatusSnapshot) -> String {
     if snapshot.restore_failures > 0 {
         text.push_str(&format!("\n복원 실패 {}건", snapshot.restore_failures));
     }
+    if snapshot.hook_degraded {
+        text.push_str("\n감지 지연 · 자동 복구 중");
+    }
     truncate_utf16(&text, 127)
 }
 
@@ -34,6 +37,9 @@ pub fn status_menu_lines(snapshot: &StatusSnapshot) -> Vec<String> {
             "복원 실패 {}건 (초기화 가능)",
             snapshot.restore_failures
         ));
+    }
+    if snapshot.hook_degraded {
+        lines.push("감지 지연 · 자동 복구 중".into());
     }
     let error = snapshot.last_error.trim();
     if !error.is_empty() {
@@ -74,6 +80,7 @@ mod tests {
     #[test]
     fn status_lines_report_counters_and_failures() {
         let snapshot = StatusSnapshot {
+            hook_degraded: true,
             enabled: true,
             aggressive: false,
             main_windows: 2,
@@ -84,6 +91,7 @@ mod tests {
             last_error: "restore show failed hwnd=42".into(),
         };
         let lines = status_menu_lines(&snapshot);
+        assert!(lines.iter().any(|l| l.contains("감지 지연")));
         assert!(lines.iter().any(|l| l.contains("차단 ON")));
         assert!(lines.iter().any(|l| l.contains("공격 모드 OFF")));
         assert!(lines.iter().any(|l| l.contains("메인윈도우 2")));

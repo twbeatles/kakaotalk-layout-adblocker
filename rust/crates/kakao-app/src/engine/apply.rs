@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use kakao_core::{Evaluation, WindowGraph, WindowIdentity};
 use kakao_win32::api::{Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, WM_CLOSE};
@@ -16,7 +17,7 @@ pub fn capture_snapshot(
     let node = graph.get(hwnd)?;
     Some(RestoreSnapshot {
         identity: node.identity(),
-        was_visible: api.is_window_visible(hwnd),
+        was_visible: api.has_visible_style(hwnd),
         rect: api.get_window_rect(hwnd).or(node.rect),
         top_level: node.structural_parent.is_none(),
     })
@@ -63,7 +64,10 @@ pub fn apply_evaluation(
         return;
     }
     let precheck = |hwnd: i64| -> bool {
-        if flags.stopping.load(Ordering::SeqCst) {
+        if flags.stopping.load(Ordering::SeqCst)
+            || !flags.enabled.load(Ordering::SeqCst)
+            || !flags.apply.load(Ordering::SeqCst)
+        {
             return false;
         }
         let Some(node) = graph.get(hwnd) else {
@@ -77,41 +81,32 @@ pub fn apply_evaluation(
         identity_matches(api, &node.identity()) && !api.is_hung_app_window(hwnd)
     };
 
-    for hwnd in &evaluation.actions.close {
-        if !precheck(*hwnd) {
-            continue;
-        }
-        let (delivered, _) = api.send_message_timeout(*hwnd, WM_CLOSE, 0, 0, 500);
-        // A close request is only a request. Record what actually happened so
-        // a KakaoTalk UI change that starts refusing WM_CLOSE is diagnosable
-        // from the log instead of silently relying on the hide fallback.
-        // DEBUG, not WARN: a surviving popup is re-evaluated every tick.
-        if !api.is_window(*hwnd) {
-            flags.closed_windows.fetch_add(1, Ordering::SeqCst);
-            debug!(hwnd = *hwnd, "window destroyed by WM_CLOSE");
-        } else if delivered {
-            debug!(
-                hwnd = *hwnd,
-                "window refused WM_CLOSE; hide/zero-size fallback applies"
-            );
-        } else {
-            debug!(
-                hwnd = *hwnd,
-                error = api.get_last_error(),
-                "WM_CLOSE was not delivered; hide/zero-size fallback applies"
-            );
+    // Capture every affected window before hiding any ancestor. Child visibility
+    // and geometry must describe the original tree, not a partially hidden one.
+    for hwnd in evaluation.actions.hide.iter().copied().chain(
+        evaluation
+            .actions
+            .set_pos
+            .iter()
+            .filter(|p| p.len() >= 5 && (p[3] <= 0 || p[4] <= 0))
+            .map(|p| p[0]),
+    ) {
+        if precheck(hwnd) {
+            remember_snapshot(api, graph, hwnd, snapshots);
         }
     }
+    let apply_started = Instant::now();
     for hwnd in &evaluation.actions.hide {
         if !precheck(*hwnd) {
             continue;
         }
-        remember_snapshot(api, graph, *hwnd, snapshots);
+
         // ShowWindow returns non-zero only when the window was previously
         // visible, so this counts newly hidden windows rather than the
         // per-tick re-application on an already hidden one.
-        if api.show_window(*hwnd, SW_HIDE) {
+        if api.has_visible_style(*hwnd) && api.show_window(*hwnd, SW_HIDE) {
             flags.hidden_windows.fetch_add(1, Ordering::SeqCst);
+            debug!(target: "kakao_latency", hwnd = *hwnd, apply_elapsed_us = apply_started.elapsed().as_micros() as u64, "first hide");
         }
     }
     for pos in &evaluation.actions.set_pos {
@@ -127,6 +122,14 @@ pub fn apply_evaluation(
         let width = pos[3];
         let height = pos[4];
         let is_view_resize = width > 0 && height > 0;
+        if !is_view_resize
+            && graph
+                .get(hwnd)
+                .and_then(|node| node.rect)
+                .is_some_and(|rect| rect.width() == 0 && rect.height() == 0)
+        {
+            continue;
+        }
         // Python stop() restores hidden/zero-sized windows only. Snapshotting
         // OnlineMainView resize and replaying GetWindowRect through
         // SetWindowPos treats screen coordinates as parent-relative, which
@@ -149,5 +152,41 @@ pub fn apply_evaluation(
         if applied && is_view_resize {
             flags.resized_windows.fetch_add(1, Ordering::SeqCst);
         }
+    }
+    let close_deadline = Instant::now() + Duration::from_millis(100);
+    for hwnd in &evaluation.actions.close {
+        if !precheck(*hwnd) {
+            continue;
+        }
+        let remaining = close_deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u32;
+        if remaining == 0 {
+            break;
+        }
+        let (delivered, _) = api.send_message_timeout(*hwnd, WM_CLOSE, 0, 0, remaining.min(50));
+        // A close request is only a request. Record what actually happened so
+        // a KakaoTalk UI change that starts refusing WM_CLOSE is diagnosable
+        // from the log instead of silently relying on the hide fallback.
+        // DEBUG, not WARN: a surviving popup is re-evaluated every tick.
+        if !api.is_window(*hwnd) {
+            flags.closed_windows.fetch_add(1, Ordering::SeqCst);
+            debug!(hwnd = *hwnd, "window destroyed by WM_CLOSE");
+        } else if delivered {
+            debug!(
+                hwnd = *hwnd,
+                "window refused WM_CLOSE; hide/zero-size fallback applies"
+            );
+        } else {
+            debug!(
+                hwnd = *hwnd,
+                error = api.get_last_error(),
+                "WM_CLOSE was not delivered; hide/zero-size fallback applies"
+            );
+        }
+    }
+    // A close may destroy the whole host subtree; do not retain dead snapshots.
+    if !evaluation.actions.close.is_empty() {
+        snapshots.retain(|identity, _| identity_matches(api, identity));
     }
 }

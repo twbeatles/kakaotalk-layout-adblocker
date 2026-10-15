@@ -1,10 +1,29 @@
-﻿# Project Audit
+# Project Audit
 
 - 감사 일자: **2026-10-15 (Asia/Seoul)**
 - 대상: KakaoTalk Layout AdBlocker **11.1.9**, `main` / `e31afc9`
 - 초점: 기능·런타임 안정성, 특히 **광고가 0.n초 보였다가 사라지는 현상**
 - 변경 범위: 이 보고서만 갱신. 구현·설정·fixture·테스트 코드는 수정하지 않았다.
 - 기존 2026-10-04 감사본을 대체한다. 당시 수정된 워커 중단 알림·시작프로그램 실패 알림·종료 복원 순서 개선을 미해결 버그로 다시 세지 않았다.
+
+## 감사 후 조치 — 2026-10-15
+
+아래 본문은 수정 전 e31afc9의 감사 기록이다. 현재 미해결 목록으로 읽지 않는다. [작업 목록](specs/001-audit-runtime-fixes/tasks.md)과 [실측 절차](docs/testing/LATENCY_VALIDATION.md)를 참고한다.
+
+| 항목 | 조치 |
+|---|---|
+| ISSUE-001 | snapshot→hide/zero-size/resize→close. 건당 50ms/tick 총 100ms close 예산. fake 순서 및 300ms 실제 Win32 WndProc 검증. |
+| ISSUE-002 | OFF 200ms~5초 retry·reset 즉시 예약·제어 wake-up. 게이지는 실제 결과로 갱신. |
+| ISSUE-003 | 같은 PID 설치 실패도 1~32초 retry. degraded 트레이 표시/복구 시 해소. |
+| GAP-01 | 제목 없는 DEBUG 단계별 trace, series elapsed_ms/capture_us. 기존 dump에는 제목이 있음. |
+| GAP-02 | 유휴 후 첫 스캔 즉시·후속 cadence 병합/유한 burst. core 판정/golden 불변. |
+| GAP-03 / GAP-06 | 선택 low_latency_mode=true: 부재 최소 200ms, 생존 중 추가 PID 최소 2초. false는 이전 절전 정책. |
+| GAP-04 | 종료 상한 유지. 영속 HWND 복원은 재사용 위험 때문에 도입하지 않고 카카오톡 재시작 복구를 안내. |
+| GAP-05 | 새 헬퍼의 60초 readiness/250ms 생존 확인, 실패 시 소유 child 회수 후 rollback. 구 헬퍼에는 미적용, EXE 두 개 함께 배치 필요. |
+| 문서·설정 | README/CLAUDE/호환성의 보장·버전·스케줄 정정. 일부 타입 오류 옆 유효 외부 편집도 토글 저장 시 보존. |
+| 남은 검증 | 실제 KakaoTalk p50/p95/max·CPU, Windows 10/ARM64/DPI·혼합 모니터·soak는 NOT RUN. 0프레임 달성을 주장하지 않음. |
+
+최종 자동 검증 결과는 작업 목록에 기록한다. 릴리스 태그를 발행한 작업은 아니다.
 
 ## 1. Executive Summary
 

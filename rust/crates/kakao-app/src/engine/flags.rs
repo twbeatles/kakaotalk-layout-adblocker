@@ -4,6 +4,12 @@ use std::sync::{Arc, Mutex};
 use crate::config::AppSettings;
 
 pub struct SharedFlags {
+    wake: Mutex<Option<std::thread::Thread>>,
+    #[cfg(windows)]
+    worker_thread_id: AtomicU32,
+    pub successful_ticks: AtomicU32,
+    pub worker_ready: AtomicBool,
+    pub hook_degraded: Arc<AtomicBool>,
     pub enabled: Arc<AtomicBool>,
     pub aggressive: Arc<AtomicBool>,
     pub stopping: Arc<AtomicBool>,
@@ -33,6 +39,12 @@ pub struct SharedFlags {
 impl SharedFlags {
     pub fn from_settings(settings: &AppSettings, apply: bool) -> Arc<Self> {
         Arc::new(Self {
+            wake: Mutex::new(None),
+            #[cfg(windows)]
+            worker_thread_id: AtomicU32::new(0),
+            successful_ticks: AtomicU32::new(0),
+            worker_ready: AtomicBool::new(false),
+            hook_degraded: Arc::new(AtomicBool::new(false)),
             enabled: Arc::new(AtomicBool::new(settings.enabled)),
             aggressive: Arc::new(AtomicBool::new(settings.aggressive_mode)),
             stopping: Arc::new(AtomicBool::new(false)),
@@ -48,6 +60,58 @@ impl SharedFlags {
             last_error: Arc::new(Mutex::new(String::new())),
             restore_error_active: AtomicBool::new(false),
         })
+    }
+
+    pub(super) fn register_worker(&self) {
+        // Create the message queue before publishing the ID: PostThreadMessage
+        // otherwise fails on a worker that has not installed a hook yet.
+        #[cfg(windows)]
+        unsafe {
+            let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+            let _ = windows::Win32::UI::WindowsAndMessaging::PeekMessageW(
+                &mut msg,
+                None,
+                0,
+                0,
+                windows::Win32::UI::WindowsAndMessaging::PM_NOREMOVE,
+            );
+            self.worker_thread_id.store(
+                windows::Win32::System::Threading::GetCurrentThreadId(),
+                Ordering::SeqCst,
+            );
+        }
+        *self.wake.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current());
+    }
+
+    pub(super) fn unregister_worker(&self) {
+        let mut wake = self.wake.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(windows)]
+        self.worker_thread_id.store(0, Ordering::SeqCst);
+        *wake = None;
+    }
+    /// Wake both park-based OFF/absent waits and WinEvent message waits.
+    pub fn notify_control(&self) {
+        // Keep registration locked until posting completes. The worker cannot
+        // exit and recycle its native thread ID during this operation.
+        let wake = self.wake.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(worker) = wake.as_ref() {
+            worker.unpark();
+        }
+        #[cfg(windows)]
+        unsafe {
+            let id = self.worker_thread_id.load(Ordering::SeqCst);
+            if id != 0 {
+                let _ = windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW(
+                    id,
+                    windows::Win32::UI::WindowsAndMessaging::WM_APP,
+                    windows::Win32::Foundation::WPARAM(0),
+                    windows::Win32::Foundation::LPARAM(0),
+                );
+            }
+        }
+    }
+    pub(super) fn wait_for_control(&self, timeout: std::time::Duration) {
+        std::thread::park_timeout(timeout);
     }
 
     pub fn set_last_error(&self, message: &str) {
@@ -80,6 +144,14 @@ impl SharedFlags {
             self.clear_restore_error();
         } else if !err.is_empty() {
             self.set_restore_error(err);
+        }
+    }
+
+    pub(super) fn clear_error_if(&self, expected: &str) {
+        if let Ok(mut guard) = self.last_error.lock() {
+            if guard.as_str() == expected {
+                guard.clear();
+            }
         }
     }
 

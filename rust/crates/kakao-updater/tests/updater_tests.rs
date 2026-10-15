@@ -120,3 +120,72 @@ fn relaunch_previous_needs_an_existing_file_and_discard_removes_staging() {
     discard_replacement(&staged); // idempotent
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn readiness_failure_rolls_back_and_success_releases_backup() {
+    use kakao_updater::{update_executable_with, UpdateOptions};
+    for mode in ["exit", "timeout", "ack"] {
+        // Copy only this test executable into an isolated test-owned directory.
+        let dir =
+            std::env::temp_dir().join(format!("kakao_handshake_{}_{}", std::process::id(), mode));
+        fs::create_dir_all(&dir).unwrap();
+        let current = dir.join("app.exe");
+        let replacement = dir.join("next.exe");
+        fs::write(&current, b"previous-version").unwrap();
+        fs::copy(std::env::current_exe().unwrap(), &replacement).unwrap();
+        // Each named fixture inherits the helper-owned readiness path.
+        let result = update_executable_with(
+            &current,
+            &replacement,
+            0,
+            Duration::from_secs(1),
+            &UpdateOptions {
+                relaunch: true,
+                relaunch_args: vec![
+                    "--exact".into(),
+                    format!("readiness_{mode}_child"),
+                    "--nocapture".into(),
+                ],
+                readiness_timeout: Some(Duration::from_millis(if mode == "ack" {
+                    1500
+                } else {
+                    400
+                })),
+                ..UpdateOptions::default()
+            },
+        );
+        if mode == "ack" {
+            assert!(result.is_ok(), "{result:?}");
+        } else {
+            assert!(matches!(result, Err(HelperError::RelaunchFailed(_))));
+            assert_eq!(fs::read(&current).unwrap(), b"previous-version");
+        }
+        assert!(!current.with_extension("exe.old").exists());
+        // Successful child may still be running; leave its isolated executable
+        // for the OS temp cleanup rather than deleting a live image.
+        if mode != "ack" {
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+}
+
+#[test]
+fn readiness_exit_child() {
+    if std::env::var_os("KAKAO_UPDATE_READY_FILE").is_some() {
+        std::process::exit(17);
+    }
+}
+#[test]
+fn readiness_timeout_child() {
+    if std::env::var_os("KAKAO_UPDATE_READY_FILE").is_some() {
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+#[test]
+fn readiness_ack_child() {
+    if let Some(path) = std::env::var_os("KAKAO_UPDATE_READY_FILE") {
+        std::fs::write(path, std::process::id().to_string()).unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+        std::process::exit(0);
+    }
+}

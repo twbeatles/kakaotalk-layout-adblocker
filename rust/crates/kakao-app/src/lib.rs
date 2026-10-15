@@ -34,6 +34,10 @@ pub fn run_with_args(args: Args) -> i32 {
         eprintln!("--dump-series-duration-ms must be <= 10000");
         return 2;
     }
+    // Consume the helper-owned acknowledgment path once; do not pass it to
+    // unrelated subprocesses or future updater launches through inheritance.
+    let update_ready = std::env::var_os("KAKAO_UPDATE_READY_FILE").map(std::path::PathBuf::from);
+    std::env::remove_var("KAKAO_UPDATE_READY_FILE");
     let paths = runtime_paths();
     let _ = std::fs::create_dir_all(&paths.appdata_dir);
 
@@ -206,9 +210,11 @@ pub fn run_with_args(args: Args) -> i32 {
 
     if let Some(exit_ms) = args.exit_after_startup_ms {
         let stopping = flags.stopping.clone();
+        let wake_flags = flags.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(exit_ms));
             stopping.store(true, std::sync::atomic::Ordering::SeqCst);
+            wake_flags.notify_control();
             #[cfg(windows)]
             {
                 for _ in 0..50 {
@@ -240,6 +246,7 @@ pub fn run_with_args(args: Args) -> i32 {
                 startup: flags.startup.clone(),
             },
             TrayStatus {
+                hook_degraded: flags.hook_degraded.clone(),
                 main_windows: flags.main_windows.clone(),
                 hidden_windows: flags.hidden_windows.clone(),
                 closed_windows: flags.closed_windows.clone(),
@@ -256,6 +263,7 @@ pub fn run_with_args(args: Args) -> i32 {
                         Ok(written) => {
                             settings = written;
                             flags_for_tray.enabled.store(next, Ordering::SeqCst);
+                            flags_for_tray.notify_control();
                         }
                         Err(err) => {
                             tracing::warn!(%err, "failed to save settings, rolling back enabled toggle");
@@ -268,6 +276,7 @@ pub fn run_with_args(args: Args) -> i32 {
                         Ok(written) => {
                             settings = written;
                             flags_for_tray.aggressive.store(next, Ordering::SeqCst);
+                            flags_for_tray.notify_control();
                         }
                         Err(err) => {
                             tracing::warn!(%err, "failed to save settings, rolling back aggressive toggle");
@@ -298,7 +307,7 @@ pub fn run_with_args(args: Args) -> i32 {
                 }
                 TrayCommand::ResetRestoreFailures => {
                     flags_for_tray.reset_restore.store(true, Ordering::SeqCst);
-                    flags_for_tray.restore_failures.store(0, Ordering::SeqCst);
+                    flags_for_tray.notify_control();
                 }
                 TrayCommand::OpenLogs => {
                     let _ = kakao_win32::tray::shell_open(&log_dir.to_string_lossy());
@@ -317,6 +326,7 @@ pub fn run_with_args(args: Args) -> i32 {
                         return;
                     }
                     let stopping = flags_for_tray.stopping.clone();
+                    let wake_flags = flags_for_tray.clone();
                     let pending = pending_for_tray.clone();
                     std::thread::spawn(move || {
                         info!("checking for updates in background thread");
@@ -338,6 +348,7 @@ pub fn run_with_args(args: Args) -> i32 {
                                             *guard = Some(staged);
                                         }
                                         stopping.store(true, Ordering::SeqCst);
+                                        wake_flags.notify_control();
                                         let _ = kakao_win32::tray::request_exit();
                                     }
                                     Err(err) => {
@@ -375,7 +386,28 @@ pub fn run_with_args(args: Args) -> i32 {
             },
             {
                 let startup_trace = startup_trace.clone();
+                let ready_flags = flags.clone();
                 move || {
+                    if let Some(path) = update_ready {
+                        std::thread::spawn(move || {
+                            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                            while !ready_flags.worker_ready.load(Ordering::SeqCst) {
+                                if ready_flags.worker_exited.load(Ordering::SeqCst)
+                                    || std::time::Instant::now() >= deadline
+                                {
+                                    return;
+                                }
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            if !ready_flags.stopping.load(Ordering::SeqCst) {
+                                if let Err(err) =
+                                    std::fs::write(path, std::process::id().to_string())
+                                {
+                                    tracing::warn!(%err, "update readiness acknowledgment failed");
+                                }
+                            }
+                        });
+                    }
                     observability::write_startup_trace(
                         startup_trace.as_deref(),
                         startup_launch,
@@ -398,6 +430,7 @@ pub fn run_with_args(args: Args) -> i32 {
             flags
                 .stopping
                 .store(true, std::sync::atomic::Ordering::SeqCst);
+            flags.notify_control();
             info!("tray unavailable, stopping worker then exiting");
             match engine::join_with_timeout(worker, WORKER_STOP_TIMEOUT) {
                 Some(Err(_)) => error!("engine worker panic"),
@@ -428,12 +461,23 @@ pub fn run_with_args(args: Args) -> i32 {
     flags
         .stopping
         .store(true, std::sync::atomic::Ordering::SeqCst);
+    flags.notify_control();
     // Bounded: restoring windows calls ShowWindow/SetWindowPos synchronously on
     // KakaoTalk's windows, which can block while KakaoTalk is not responding.
     // Waiting forever kept an invisible process holding the single-instance
     // mutex; exiting the process ends the stuck thread instead.
     let join_ok = match engine::join_with_timeout(worker, WORKER_STOP_TIMEOUT) {
-        Some(Ok(_)) => true,
+        Some(Ok(caches)) => {
+            if caches.snapshots.is_empty() {
+                true
+            } else {
+                tracing::warn!(
+                    pending_windows = caches.snapshots.len(),
+                    "shutdown left unrestored windows; restart KakaoTalk to recover UI"
+                );
+                false
+            }
+        }
         Some(Err(_)) => {
             error!("engine worker panic");
             false

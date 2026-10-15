@@ -221,8 +221,8 @@ fn f04_close_timeout_and_delivery_failure_keep_ticking() {
     );
 
     // …and nothing in this path sleeps: the virtual timeout is instant.
-    // (If `send_message_timeout` ever blocked 500ms × N, this file's suite
-    // would blow its time budget — it doesn't.)
+    // This checks outcomes/order only; native_close_latency tests a real delayed
+    // WndProc. A virtual timeout cannot establish production latency.
 }
 
 #[test]
@@ -796,4 +796,38 @@ fn f19_unknown_host_text_blocks_popup_until_known() {
         !h.api.is_window_visible(200),
         "readable empty host re-arms dismissal"
     );
+}
+
+#[test]
+fn f21_all_suppression_precedes_close_and_child_snapshot_keeps_visibility() {
+    let mut h = boot("popup_adfit_webview.json", enabled_settings(), true);
+    h.api.set_ancestor_visibility(true);
+    h.api.set_close_behavior(200, CloseBehavior::Timeout);
+    h.tick();
+    let calls = h.api.take_api_calls();
+    let first_close = calls
+        .iter()
+        .position(|c| c.method == "send_message_timeout")
+        .unwrap();
+    for target in [200, 201] {
+        let hide = calls
+            .iter()
+            .position(|c| c.target == target && c.method == "show_window")
+            .unwrap();
+        assert!(
+            hide < first_close,
+            "all ads must be hidden before any slow close"
+        );
+        assert!(
+            h.caches
+                .snapshots
+                .values()
+                .find(|s| s.identity.hwnd == target)
+                .unwrap()
+                .was_visible
+        );
+    }
+    h.caches.drain_restore_all(&h.api);
+    assert!(h.api.is_window_visible(200));
+    assert!(h.api.is_window_visible(201));
 }

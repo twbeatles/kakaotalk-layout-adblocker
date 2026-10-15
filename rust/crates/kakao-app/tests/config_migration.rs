@@ -298,3 +298,21 @@ fn update_settings_uses_fallback_when_the_file_is_unreadable() {
     assert!(!written.enabled);
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn update_preserves_valid_external_fields_beside_an_invalid_field() {
+    let dir = unique_temp_dir("partial_update");
+    let path = dir.join("settings.json");
+    std::fs::write(
+        &path,
+        r#"{"poll_interval_ms":75,"low_latency_mode":false,"aggressive_mode":"bad"}"#,
+    )
+    .unwrap();
+    let fallback = kakao_app::config::AppSettings::default();
+    let next = kakao_app::config::update_settings(&path, &fallback, |s| s.enabled = false).unwrap();
+    assert_eq!(next.poll_interval_ms, 75);
+    assert!(!next.low_latency_mode);
+    assert!(next.aggressive_mode);
+    assert!(!next.enabled);
+    let _ = std::fs::remove_dir_all(dir);
+}

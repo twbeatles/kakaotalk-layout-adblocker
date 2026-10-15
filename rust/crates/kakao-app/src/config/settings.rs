@@ -25,6 +25,9 @@ pub struct AppSettings {
     pub idle_backoff_max_ms: u32,
     #[serde(default = "default_pid_scan")]
     pub pid_scan_interval_ms: u32,
+    /// Faster cold-start discovery; false retains the power-saving backoff.
+    #[serde(default)]
+    pub low_latency_mode: bool,
     #[serde(default = "default_cache_cleanup")]
     pub cache_cleanup_interval_ms: u32,
     #[serde(default = "default_burst_iter")]
@@ -138,19 +141,19 @@ fn merge_typed_settings(
 /// Read-modify-write for tray toggles: apply `change` to the settings
 /// currently on disk rather than to the copy loaded at startup, so values the
 /// user edited in the JSON while the app was running are not overwritten.
-/// Falls back to `fallback` when the file cannot be read cleanly. Returns the
-/// settings that were written.
+/// Invalid/missing fields keep `fallback`; valid external fields are preserved
+/// even when a sibling field is invalid. Returns the settings that were written.
 pub fn update_settings(
     path: &Path,
     fallback: &AppSettings,
     change: impl FnOnce(&mut AppSettings),
 ) -> std::io::Result<AppSettings> {
-    let (on_disk, warnings) = load_settings(path);
-    let mut next = if warnings.is_empty() && path.is_file() {
-        on_disk
-    } else {
-        fallback.clone()
-    };
+    let (value, warnings) = load_json_value(path, "layout_settings_v11.json");
+    let (mut next, field_warnings) =
+        merge_typed_settings(fallback.clone(), &value, "layout_settings_v11.json");
+    for warning in warnings.iter().chain(&field_warnings) {
+        tracing::warn!("{warning}");
+    }
     change(&mut next);
     save_settings(path, &next)?;
     Ok(next)

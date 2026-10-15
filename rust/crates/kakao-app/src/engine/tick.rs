@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kakao_core::{
     evaluate_graph_for_apply, evaluate_graph_with_states, Evaluation, LayoutRules, WindowGraph,
@@ -30,7 +30,10 @@ pub fn tick(
     if pids.is_empty() && caches.snapshots.is_empty() {
         return Evaluation::default();
     }
+    let tick_started = Instant::now();
     let graph = build_graph(api, pids);
+    let graph_us = tick_started.elapsed().as_micros() as u64;
+    let evaluation_started = Instant::now();
     let apply_mode = flags.apply.load(Ordering::SeqCst) && core.enabled;
     // The diagnostic `candidates` payload costs a second full traversal and is
     // discarded on the apply path, so only build it when something reads it.
@@ -39,6 +42,7 @@ pub fn tick(
     } else {
         evaluate_graph_with_states(&graph, &core, rules, &mut caches.states)
     };
+    let evaluate_us = evaluation_started.elapsed().as_micros() as u64;
     flags.main_windows.store(
         u32::try_from(evaluation.state.main_window_count).unwrap_or(0),
         Ordering::SeqCst,
@@ -50,6 +54,7 @@ pub fn tick(
         prune_gone_identities(&graph, caches);
     }
 
+    let apply_started = Instant::now();
     if apply_mode {
         let pid_set: HashSet<i64> = pids.iter().copied().collect();
         apply_evaluation(
@@ -77,6 +82,7 @@ pub fn tick(
             );
         }
     }
+    tracing::debug!(target: "kakao_latency", graph_us, evaluate_us, apply_restore_us = apply_started.elapsed().as_micros() as u64, total_us = tick_started.elapsed().as_micros() as u64, "tick stages");
     evaluation
 }
 

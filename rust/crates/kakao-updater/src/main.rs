@@ -78,6 +78,7 @@ fn main() {
             relaunch,
             relaunch_args: args.relaunch_arg.clone(),
             expected_sha256: args.sha256.clone(),
+            readiness_timeout: args.sha256.as_ref().map(|_| Duration::from_secs(60)),
         },
     ) {
         Ok(()) => {

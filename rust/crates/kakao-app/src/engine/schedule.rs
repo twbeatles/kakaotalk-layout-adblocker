@@ -37,6 +37,14 @@ pub fn pid_scan_interval(
     pids_alive: bool,
     absent_for: Duration,
 ) -> Duration {
+    let base = Duration::from_millis(u64::from(settings.pid_scan_interval_ms.max(200)));
+    if settings.low_latency_mode {
+        return if pids_alive {
+            base.max(Duration::from_secs(2))
+        } else {
+            base
+        };
+    }
     if pids_alive {
         return ALIVE_RESYNC_INTERVAL;
     }
@@ -78,7 +86,10 @@ mod tests {
     use super::*;
 
     fn settings() -> AppSettings {
-        AppSettings::default()
+        AppSettings {
+            low_latency_mode: false,
+            ..AppSettings::default()
+        }
     }
 
     #[test]
@@ -160,6 +171,26 @@ mod tests {
         assert_eq!(
             reconcile_interval(&off, false, Duration::from_secs(3600), true),
             Duration::from_millis(200)
+        );
+    }
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+    #[test]
+    fn latency_mode_bounds_cold_start_and_additional_process_discovery() {
+        let settings = AppSettings {
+            low_latency_mode: true,
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            pid_scan_interval(&settings, false, Duration::from_secs(600)),
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            pid_scan_interval(&settings, true, Duration::ZERO),
+            Duration::from_secs(2)
         );
     }
 }

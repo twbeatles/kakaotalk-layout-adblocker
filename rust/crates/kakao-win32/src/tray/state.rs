@@ -11,6 +11,7 @@ pub struct TrayFlags {
 /// these the "복원 실패 초기화" menu item resets a number nobody can see.
 #[derive(Clone, Default)]
 pub struct TrayStatus {
+    pub hook_degraded: Arc<AtomicBool>,
     pub main_windows: Arc<AtomicU32>,
     pub hidden_windows: Arc<AtomicU32>,
     pub closed_windows: Arc<AtomicU32>,
@@ -22,6 +23,7 @@ pub struct TrayStatus {
 /// Plain snapshot so the status text can be unit-tested without Win32.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusSnapshot {
+    pub hook_degraded: bool,
     pub enabled: bool,
     pub aggressive: bool,
     pub main_windows: u32,
@@ -35,6 +37,7 @@ pub struct StatusSnapshot {
 impl StatusSnapshot {
     pub(super) fn capture(flags: &TrayFlags, status: &TrayStatus) -> Self {
         Self {
+            hook_degraded: status.hook_degraded.load(Ordering::SeqCst),
             enabled: flags.enabled.load(Ordering::SeqCst),
             aggressive: flags.aggressive.load(Ordering::SeqCst),
             main_windows: status.main_windows.load(Ordering::SeqCst),
