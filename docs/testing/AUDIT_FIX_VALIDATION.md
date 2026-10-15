@@ -1,6 +1,6 @@
 # Runtime audit fixes — validation record
 
-Date: 2026-10-15 (Asia/Seoul). Implementation is Unreleased, based on 11.1.9.
+Date: 2026-10-15 (Asia/Seoul). Implementation released as v11.1.10, based on v11.1.9.
 
 ## Automated verification
 
@@ -33,4 +33,4 @@ Cold-start/warm screen p50/p95/max, new-mode CPU, Windows 10/ARM64/DPI matrix an
 These are collection/evaluation costs with the old blocker still running, not screen-visible latency or measured application CPU.
 At this cost, 200ms PID polling alone could consume about 9% of one core (arithmetic estimate). Therefore low_latency_mode is **opt-in, default false**; immediate event reconciliation and hide-before-close improvements remain enabled by default.
 
-Release app/helper build and isolated `--self-check --strict-self-check --json`: exit 0, version 11.1.9, core ok, one KakaoTalk process, zero core/info warnings. The final opt-in/default-false policy was rebuilt and strict-self-checked successfully before packaging.
+Release app/helper build and isolated `--self-check --strict-self-check --json`: exit 0, version 11.1.9, core ok, one KakaoTalk process, zero core/info warnings. The final opt-in/default-false policy was rebuilt and strict-self-checked successfully before packaging; the published v11.1.10 binaries were rebuilt by the tag workflow.

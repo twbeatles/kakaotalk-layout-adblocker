@@ -3,7 +3,7 @@
 > **관리자 권한(UAC)·시스템 변조·hosts 수정 없이, 순수 Win32 레이아웃 제어로 동작하는 초경량 카카오톡 광고 차단기**
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.9-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.10-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
 [![Idle CPU](https://img.shields.io/badge/Idle%20CPU-~0.16%25%20of%201%20core-brightgreen)](BENCHMARK.md)

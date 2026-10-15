@@ -3,7 +3,7 @@
 ## 개요
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
-- 버전: `11.1.9` (런타임 개선은 CHANGELOG Unreleased 참고)
+- 버전: `11.1.10` (런타임 개선 및 검증 범위는 CHANGELOG와 docs/testing/AUDIT_FIX_VALIDATION.md 참고)
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)

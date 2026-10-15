@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-10-15
+## 11.1.10 - 2026-10-15
 
 - 판정/golden은 유지하고 snapshot→hide/zero-size/resize→bounded close 순서로 변경.
 - 첫 이벤트 선행 대기 제거, cadence가 있는 후속 burst, 저지연 PID 선택 옵션 추가(기본 절전 유지).
@@ -9,6 +9,11 @@
 - 새 헬퍼의 readiness/짧은 생존 확인 및 실패 rollback. 새 EXE 두 개 함께 배치 필요.
 - 설정 일부 필드가 잘못돼도 나머지 유효 외부 편집은 토글 저장 시 보존.
 - Win32 off-screen 느린 close·worker 전환·업데이트 자식 프로세스 회귀 테스트. 실화면·CPU·플랫폼 측정은 별도.
+
+### 릴리스 검증 범위
+- 자동화: workspace 172 passed / 0 failed / 2 ignored, fmt, clippy, release 빌드, 격리된 strict self-check 통과.
+- 실기 shadow: 실행 중 KakaoTalk 26.8.2.5324에서 Strong 광고 후보 1개 식별. 기존 차단기가 해당 창을 숨긴 상태라 새 바이너리의 실화면 노출 시간은 측정하지 않았다.
+- 실화면 p50/p95/max, 새 모드 CPU, Windows 10/ARM64/DPI 조합 및 1시간 soak는 미실행이며 0프레임 보장은 하지 않는다. 상세: docs/testing/AUDIT_FIX_VALIDATION.md.
 
 ## 11.1.9 - 2026-10-14
 
