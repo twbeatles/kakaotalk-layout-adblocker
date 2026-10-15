@@ -1,133 +1,260 @@
-# Project Audit
+﻿# Project Audit
 
-- **감사 일자:** 2026-10-04
-- **대상:** KakaoTalk Layout AdBlocker **v11.1.5** (Rust 네이티브 단일화 직후) / branch `main` @ `0a76fa5`
-- **방식:** 문서 정독 → CodeGraph 호출 흐름 추적 → 원문 열람 → `cargo test --workspace` 실행 → 반증 후 이슈 확정
-- **코드 변경:** 없음. 본 문서만 작성했다.
-- **이전 감사 처리:** 2026-09-24 감사본을 대체한다. 당시 지적 사항은 v11.1.5에 반영되어 있고(회귀 테스트 존재 확인), 본 감사는 그 위에서 현재 상태를 재감사했다.
-- **조치 상태(2026-10-04):** 본 감사 지적 중 ISSUE-001·Gap-01·Gap-02·만료 파싱 로그를 같은 날 구현했다.
-  종료 복원은 healthy-first 순서(`restore_all_final`)로 바꾸고 타임아웃 경고를 카운터 포함으로 강화했다.
-  워커 감시 스레드가 예상 밖 종료를 1회 다이얼로그로 알린다(스냅샷 없는 재기동은 복원放棄라서 하지 않음).
-  시작프로그램 토글 레지스트리 실패에 에러 다이얼로그를 추가했다.
-  `update_settings` 테스트는 이미 존재함을 확인하고 추가하지 않았다.
-  Gap-03(WM_CLOSE tick 예산)은 관측 근거 없이 엔진 타이밍을 바꾸는 것이라 미적용으로 남긴다.
-  검증: `cargo fmt --check` 통과, `cargo clippy --all-targets --all-features -- -D warnings` 통과,
-  `cargo test --workspace` 114 passed / 0 failed (신규 3건 포함).
+- 감사 일자: **2026-10-15 (Asia/Seoul)**
+- 대상: KakaoTalk Layout AdBlocker **11.1.9**, `main` / `e31afc9`
+- 초점: 기능·런타임 안정성, 특히 **광고가 0.n초 보였다가 사라지는 현상**
+- 변경 범위: 이 보고서만 갱신. 구현·설정·fixture·테스트 코드는 수정하지 않았다.
+- 기존 2026-10-04 감사본을 대체한다. 당시 수정된 워커 중단 알림·시작프로그램 실패 알림·종료 복원 순서 개선을 미해결 버그로 다시 세지 않았다.
 
 ## 1. Executive Summary
 
-프로젝트는 전반적으로 **양호**하다. Rust 단일화 정리(`0a76fa5`) 이후에도 전체 테스트가 통과하고(`111 passed / 0 failed / 2 ignored`), 설정 self-heal·원자적 저장·복원 백오프·업데이트 서명 검증 같은 안정성 장치가 코드와 테스트 양쪽에 실재한다. 과장된 위험은 없다.
+프로젝트는 광고 판정·적용·복원을 분리하고, 오탐 방지 가드·스냅샷·설정 원자 저장·서명 검증을 갖춘 Windows 전용 도구다. 정적 기능 검증은 양호하지만 **화면 노출 시간과 실제 워커 상태 전환 검증은 부족하다. 전체 위험도는 Medium / Needs Work**다. Critical/High에 해당하는 미반증 이슈는 찾지 못했다.
 
-- **전체 위험도: 낮음.** Critical/High 이슈는 없다. Medium 1건, Low 3건이다.
-- **가장 중요한 문제:**
-  1. 종료 시 워커 join timeout이면 진행 중 복원이放棄되고 스냅샷이 함께 사라진다 (Medium/Likely).
-  2. 워커 루프 자체가 죽으면 감지만 하고 자동 복구가 없어 사용자가 직접 재시작해야 한다 (Medium/Likely Gap).
-  3. 시작프로그램 토글의 레지스트리 실패가 무음으로 무시된다 (Low/Confirmed Gap).
-  4. 팝업 연속 `WM_CLOSE`(각 500ms 순차 대기)가 tick을 묶어 둘 수 있다 (Low/Confirmed Gap).
-- **데이터 손상/유실 가능성: 사실상 없음.** 설정 파일은 원자적 교체+파손 백업+기본값 재생성, 업데이트는 서명 검증+백업+실패 시 이전 버전 재실행으로 보호된다.
-- **가장 먼저 수정해야 할 영역:** 종료 경로의 복원 보장(`lib.rs` shutdown), 워커 루프 사망 감시, 트레이 토글 실패 피드백.
+가장 중요한 발견은 다음과 같다.
+
+1. **팝업 숨김보다 모든 WM_CLOSE 대기가 먼저 실행된다.** 느린 close 하나가 다른 광고의 hide/resize까지 늦춘다. ISSUE-001, Medium/Likely.
+2. **차단 OFF 전환의 복원 실패는 OFF 유지 중 재시도되지 않는다.** 카카오톡이 회복해도 숨김·zero-size 상태가 남을 수 있다. ISSUE-002, Medium/Confirmed.
+3. **훅 설치가 한 번 실패하면 동일 PID 집합에서는 재설치하지 않는다.** 일시 실패가 지속적인 폴링 지연으로 이어진다. ISSUE-003, Medium/Confirmed.
+4. **0.n초 노출을 설명하는 정상 설계 지연도 있다.** 이벤트 처리 전 기본 20ms 병합, 약한 신호 2틱 확인, 카카오톡 부재 후 최대 2초 PID 탐색 간격이다. 이를 오탐 방지 버그로 분류하지 않았다. 사용자가 보는 현상의 직접 원인은 이번 감사에서 화면 실측하지 못했다.
+
+카카오톡 대화·첨부파일·DB를 쓰는 경로는 없다. 해당 사용자 데이터의 손상·유실 경로는 확인되지 않았다. 다만 **일시적 UI 상태의 복구 실패**는 가능하며, 설정 self-heal 및 업데이트 교체의 전원 중단까지 완전 무손실이라고 보증할 수는 없다.
+
+가장 먼저 손댈 영역은 **광고 이벤트→최초 hide 지연 계측과 적용 순서**, 이어서 **OFF 상태 복원 재시도**다. 하단 owned 배너와 독립 AdFit 팝업을 구분해야 한다. 팝업 close 지연을 모든 하단 배너의 원인으로 일반화해서는 안 된다.
 
 ## 2. Project Understanding
 
-- **목적:** 카카오톡 Windows 클라이언트의 광고 영역을 Win32 레이아웃 제어(hide/resize/`WM_CLOSE`)만으로 제거. `hosts`/DNS/메모리 패치 없음.
-- **주요 entrypoint:**
-  - `dist/KakaoTalkLayoutAdBlocker_v11.exe` (또는 `cargo run -p kakao-app --release`) → `kakao-app/src/main.rs` → `run_with_args` (`lib.rs:28`)
-  - 진단 경로(단일 인스턴스 mutex 밖): `--self-check[--strict-self-check][--json]`, `--dump-tree[--series]`, `--shadow`, `--check-update`
-  - 업데이트 헬퍼: `kakao-updater.exe` (별도 크레이트, 서명 검증 교체 담당)
-- **핵심 모듈:** `kakao-core`(순수 평가: `evaluate::{inspect,apply,orchestrate}`, `rules`, `graph`), `kakao-win32`(Win32 래퍼·`tray/`, hook `startup`, `process`), `kakao-app`(`engine/{tick,worker,apply,restore,schedule,caches,flags}`, `config/`, `updater/`, `lib.rs` 컴포지션), `kakao-updater`(교체 실행).
-- **데이터 저장:** `%APPDATA%\KakaoTalkAdBlockerLayout\`의 `layout_settings_v11.json`·`layout_rules_v11.json`(원자적 교체+self-heal), 회전 로그, `HKCU Run` 시작프로그램 등록. DB 없음.
-- **외부 의존성:** `windows 0.61`(Win32), `ureq`(업데이트 HTTPS), `ed25519-dalek`(매니페스트 서명), `clap`·`serde`·`tracing`. 네트워크 사용은 업데이트 확인/다운로드뿐이다.
-- **핵심 실행 흐름:**
-  - 차단 루프: `spawn_worker → loop { PID 스캔 → WinEvent hook 유지 → guarded_tick( tick( build_graph → evaluate_graph_for_apply → apply_evaluation( snapshot → hide/resize/WM_CLOSE ) + restore_stale_hidden ) ) } → stopping 시 drain_restore_all`
-  - 토글: `TrayCommand → update_settings(디스크 재독+1필드 변경+원자 저장) → flag 반영 (저장 실패 시 롤백)`
-  - 업데이트: `CheckUpdate → check_for_update(서명·버전·URL·sha·크기·만료 검증) → 사용자 동의 → prepare_update(다운로드+sha 검증+staging) → stopping → join(복원) → launch_helper(교체+재실행, 실패 시 이전 버전 재실행)`
-  - 종료: `stopping 저장 → join_with_timeout(3s) → (staged 있으면 헬퍼 실행) → exit`
+### 목적·아키텍처·실행
+
+- 목적: Win32 창 hide/resize/WM_CLOSE만으로 카카오톡 광고 UI를 억제한다. hosts/DNS/패킷 차단이나 대상 프로세스 메모리 패치를 하지 않는다.
+- 활성 구현: Rust workspace의 `kakao-app`, `kakao-core`, `kakao-win32`, `kakao-updater`. 로컬 참고용 `legacy/` Python 구현은 production 위험 판단에서 제외했다.
+- 앱 entrypoint: `rust/crates/kakao-app/src/main.rs:6` → `run_with_args` (`src/lib.rs:28`). 배포 EXE는 `KakaoTalkLayoutAdBlocker_v11.exe`.
+- 헬퍼 entrypoint: `rust/crates/kakao-updater/src/main.rs` → `update_executable_with`.
+- 개발 실행: `cd rust; cargo run -p kakao-app --release`. 패키징은 `scripts/build_release.ps1`, CI는 `.github/workflows/windows-ci.yml`, `release.yml`.
+- Windows 전용: `run_with_args`는 비Windows에서 코드 2로 종료한다. Linux/macOS 미지원은 명시된 제품 범위다.
+- 개발 규칙: CLAUDE는 광고 판정 알고리즘을 고정 계약으로 취급하며 변경 시 실덤프·회귀 테스트·문서 근거를 요구한다. 루트 AGENTS.md 실파일은 없다. 대화로 제공된 CodeGraph 우선·main 유지 지시를 적용했다.
+
+| 영역 | 핵심 역할 |
+|---|---|
+| `kakao-core/src/evaluate/`, `signals.rs`, `layout.rs`, `rules.rs` | 순수 그래프 판정, Strong/Weak 확인, 광고 가드, action 계획 |
+| `kakao-app/src/graph_build.rs` | PID 필터 → 창 열거 → parent/owner·텍스트·rect·가시성 수집 |
+| `kakao-app/src/engine/` | 워커 스케줄, 적용, 스냅샷, stale 복원, panic 격리 |
+| `kakao-win32/src/real.rs`, `event_hook.rs`, `process.rs` | 실제 Win32 API, PID별 out-of-context 이벤트 훅, 프로세스 생존 핸들 |
+| `kakao-win32/src/tray/`, 앱 `lib.rs` | 트레이 메시지 루프·명령 큐, 설정 저장 후 atomic flag 갱신 |
+| 앱 `config/` | BOM 허용, typed overlay, 파손 백업/self-heal, 원자 저장·로그 회전 |
+| 앱 `updater/`, `kakao-updater` | HTTPS, Ed25519·SHA-256·크기·URL·버전 검증, staging, 교체·롤백 |
+
+영속 저장은 `%APPDATA%\KakaoTalkAdBlockerLayout\`의 `layout_settings_v11.json`, `layout_rules_v11.json`, `layout_adblock.log`와 현재 사용자 시작프로그램 레지스트리다. DB·migration·SQL은 없다. 설정 저장은 고유 임시파일→sync_all→rename이다. 복원용 `snapshots`, 판정용 `states`, 재시도용 `stale`은 워커 메모리에만 존재한다.
+
+공유 상태는 SharedFlags의 atomic ON/OFF·공격 모드·종료·카운터 및 mutex 오류 문자열이다. 창 변이와 스냅샷은 워커가 소유한다. 일반 앱 중복 실행은 named mutex로 막고 진단 경로는 별도 실행한다. 주요 의존성은 `windows 0.62`, `ureq 3`, `serde`, `clap`, `crossbeam-channel`, `tracing`, `ed25519-dalek 3`, `sha2`다.
+
+### 핵심 실행 흐름
+
+```text
+앱 실행 → CLI 검증 → 설정/rules 로드·경고 → 단일 인스턴스 확인
+       → 시작프로그램 상태 동기화 → spawn_worker + 트레이
+
+PID 탐색/생존 확인 → PID별 WinEvent 설치·메시지 펌프
+       → 이벤트 병합 또는 주기 도래 → guarded_tick
+       → build_graph → 메인/광고 판정·후보 streak 갱신
+       → apply_evaluation: PID/identity/hung/종료 가드
+       → close → snapshot/hide → zero-size/resize
+       → stale 복원·실패 게이지 → 트레이 결과/로그
+
+트레이 토글 → 최신 디스크 설정 재독 → 단일 필드 저장
+       → atomic flag 반영 → 워커가 다음 반복에서 적용/복원
+
+업데이트 → 단일 실행 가드 → HTTPS 매니페스트·서명 검증
+       → 사용자 동의 → 다운로드·해시 검증·staging
+       → 종료·최종 복원·join(3초 제한) → 헬퍼 실행
+       → 부모 종료 대기 → 해시 재검증 → EXE 백업·교체 → 재실행/실패 롤백
+```
+
+### 광고가 잠깐 보이는 현상의 집중 분석
+
+**화면 노출 시간은 다음 요소의 합이다.** 아래 수치는 기본 코드 스케줄이며 실측값이나 엄밀한 실시간 상한은 아니다. OS 스케줄링·Win32 호출·UI 생성 시간은 별도다.
+
+`노출 → PID 인지 → 이벤트 전달/폴링 → 병합 → 시그니처 완성·확인 → 앞선 Win32 작업 → hide → 화면 반영`
+
+| 상황 | 코드상 지연·근거 | 해석 |
+|---|---|---|
+| 감시 중인 PID에 새 광고 이벤트 | `worker.rs:275-287`: 기본 20ms pump_for 후 전체 tick | 이벤트가 도착해도 바로 hide하지 않는다. 첫 프레임 무노출 보장은 없다. |
+| 카카오톡이 30초 이상 없었다가 실행 | `schedule.rs:16-19,35-48`: PID 스캔 최대 2초 간격, 미감지 동안 훅 없음 | 마지막 스캔 직후 창이 생기면 다음 스캔까지 노출 가능. 기본 200ms 설정보다 부재 백오프가 우선한다. |
+| Strong exact legacy / 광고 토큰+하단 기하 | `signals.rs:51-57,75-76`: 첫 판정 확정 | 모든 광고가 2틱을 기다리는 것은 아니다. 기존 실측 문서의 owned 배너는 exact 경로다. |
+| Weak substring / 하단 조건 밖 Chrome+토큰 | `signals.rs:231-245`: 기본 2틱 확인 | 일반 이벤트는 burst_left를 재설정하지 않는다(`worker.rs:189-194,227-231`). 후속 이벤트가 없으면 다음 active 재확인 약 50ms를 더 기다린다. 병합과 합쳐 약 70ms 수준의 스케줄 지연이 가능하다. |
+| 텍스트·자식 시그니처가 늦게 생성 | build_graph는 매번 읽고 관측 신호로 판정 | 신호가 준비되기 전에는 의도적으로 숨기지 않는다. 광고 클래스 전체를 미리 숨기는 처방은 정상 웹뷰 오탐 위험이 있다. |
+| 훅 정상·유휴 백오프 | 이벤트가 메시지 대기를 깨움 | idle_backoff_max_ms=1000이 정상 이벤트의 고정 지연이라는 판단은 틀리다. 누락/필터링된 이벤트의 폴링 복구만 늦어진다. |
+| 훅 설치 실패 | 기본 유휴 폴링 200ms | ISSUE-003. 훅이 없으면 1초 idle 백오프를 하지 않는 보호는 있다. |
+| 느린 독립 팝업 close | close 전체 처리 후 hide. 호출당 timeout 500ms | ISSUE-001. 같은 tick의 다른 배너 hide도 밀린다. owned legacy 배너 단독 경로에 close 대기가 필수인 것은 아니다. |
+| 차단 OFF→ON | OFF 분기는 1초 sleep, 별도 깨우기 없음 | ON 요청 후 다음 반복까지 광고가 남을 수 있다. 즉시 반영 UX의 보완점이다. |
+
+**중요한 반증:** `launch_ad_flash_banner.json`은 이미 완성된 정적 창 트리다. 첫 tick에 숨겨지는 테스트가 실제 UI 생성부터 hide까지의 시간을 검증하지는 않는다. `owned_popup_legacy_ad.json`도 Strong exact이므로 사용자 현상을 일괄적으로 weak_signal_confirm_ticks=2 탓으로 돌릴 근거는 없다.
+
+우선 **광고 판정은 유지하면서 대기를 줄이는 것**을 검토한다. 실제 배너 타입과 SHOW→콜백→판정→hide를 측정하고, 이미 확정된 Strong 후보의 첫 처리 전 20ms 대기 축소를 평가한다. Weak는 2틱 안전장치를 유지한 채 첫 확인 후 짧은 재확인을 예약할 수 있다. 현재 layout-only·out-of-context 감시는 표시 전 차단을 보장하지 않으므로 “0프레임 노출” 보장과 “노출 시간 감소” 목표를 구분해야 한다.
 
 ## 3. Audit Coverage & Limitations
 
-- **CodeGraph explore 4회:** entrypoint·엔진 플로우 / 설정 저장·업데이터 / apply·복원·워커·스케줄·시작프로그램·트레이 / 매니페스트 검증·교체·종료·토글. elided 구간은 원문 직접 열람으로 보완했다(`apply.rs:79-153`, `restore.rs:38-95`, `worker.rs:107-321`, `lib.rs:150-427`, `manifest.rs:30-138`, `kakao-updater/lib.rs:129-208`, `version.rs`).
-- **실행한 테스트:** `cargo test --workspace` (이 Windows 실기에서 직접 실행) — 종료 코드 `0`, 총 **111 passed / 0 failed / 2 ignored**(무시 2건은 실데스크톱 패리티·perf 프로브의 `--ignored` 대상).
-- **확인하지 못한 것:** 실제 카카오톡이 설치된 환경에서의 `--dump-tree`/차단 동작, 트레이 GUI 상호작용, 업데이트 네트워크 호출, 서명된 릴리스 빌드(`build_release.ps1`), 비Windows fail-fast 경로(CI는 Windows 전용).
-- **CodeGraph 한계:** 일부 심볼 본문이 elided되어 파일 직접 열람으로 메웠다. 아래 근거에 인용된 행 번호는 감사 시점 원문 기준이다.
-- **검토 후 기각한 후보(반증됨):** HWND 재사용 오복원 — `identity_matches`(hwnd+pid+class)로 가드되고 회귀 테스트(`hwnd_reuse_*`, `kakaotalk_restart_ignores_stale_snapshots`)가 있다. Windows `rename` 덮어쓰기 — `config_migration` 저장/로드 테스트가 이 Windows 실기에서 통과한다. 매니페스트 위조 — 서명이 payload 전체를 덮으므로 `expires_at` 파싱 실패 허용·legacy URL 허용은 악용 불가(자사 빌드 산출물만 서명 통과). 버전 비교 — 숫자 컴포넌트 비교가 정확하고 테스트가 있다. tick panic — `guarded_tick`+테스트가 있다. 덤프 동시 실행 덮어쓰기 — 파일명에 타임스탬프가 붙는다.
+### 실제 확인한 범위
+
+- README, CLAUDE, 기존 감사본, Rust README, 호환성·테스트 강화·실측 기록, 기본 설정, Cargo 설정, CI/release workflow, 개발·릴리스 스크립트.
+- **CodeGraph MCP를 실제 사용했다.** 핵심 관계는 `run_with_args→spawn_worker→guarded_tick→tick→build_graph/evaluate_graph_for_apply→apply_evaluation/restore_stale_hidden`, `candidate_handles/legacy_hide_decision/update_candidate_state`, `EventHook::install_for_pids→hook_proc→drain/wait_message/pump_for`, PidWatch, 설정 저장 및 헬퍼 교체다.
+- 적용 전 identity/PID/hung 가드, close/hide/set_pos 순서, 스냅샷 생명주기·OFF/stop, 설정 self-heal·원자 쓰기, 로그 회전, 트레이 명령 큐와 업데이트 실패 경로를 확인했다.
+- CodeGraph가 생략한 워커 말미·앱 종료부·헬퍼 교체 본문·테스트 앞부분은 직접 열람했다. 문서/config 및 테스트 목록은 파일 열람·rg로 보완했다. 일부 테스트 이름 질의는 무관한 심볼을 반환해 직접 확인했으며, “caller 없음”을 테스트 부재의 증거로 쓰지 않았다.
+
+### 이번에 실행한 검증
+
+| 명령 (`rust/`에서 실행) | 결과 |
+|---|---|
+| `cargo test --workspace --locked --offline` | **157 passed / 0 failed / 2 ignored**, 종료 코드 0 |
+| `cargo fmt --all -- --check` | 통과, 종료 코드 0 |
+| `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings` | 통과, 종료 코드 0 |
+
+순수 계약/oracle·golden·경계·퍼즈 불변식, fake Win32 전환, 설정/BOM/저장, 복원 실패·HWND 재사용·panic, 업데이트 파일 교체, 자체 생성 테스트 창 roundtrip을 실행했다. 실 Win32 워커 테스트는 apply=false이고 self-check 테스트는 임시 APPDATA를 사용한다. dependency 설치·네트워크 업데이트·실사용 카카오톡 창 변경은 하지 않았다.
+
+미실행 ignored 2건: `single_pass_graph_matches_the_per_node_algorithm_on_the_live_desktop`, `reconciliation_cost_breakdown`. release 빌드·패키징 smoke·실제 업데이트·트레이 클릭 E2E도 이번에는 실행하지 않았다.
+
+### 한계 및 반증
+
+- 실제 화면 녹화·새 덤프·0.n초 노출 재현은 하지 않았다. 사용자 데이터가 포함될 수 있는 실창 덤프도 수집하지 않았다.
+- `docs/testing/COMPATIBILITY_EVIDENCE.md`의 2026-10-12 실측은 참고 기록이다. owned 배너 ON/종료 복원 spot 확인이며 전체 UI·DPI·노출 시간 검증은 아니다.
+- CodeGraph는 정적 관계이며 Win32 전달 시각·화면 합성·권한·동적 HWND 수명을 검증하지 않는다.
+- Windows 10/ARM64/DPI별 실행, Linux/macOS 빌드, 실제 네트워크 장애·전원 중단·보안 제품 환경은 미검증이다.
+- 타 PID 자식 변이 후보는 precheck가 실제 PID/identity를 재조회하는 점과 통과한 f20 테스트로 반증했다. HWND 재사용도 PID/class가 다른 경우 가드·회귀 테스트가 있다.
+- OFF 중 새 hide는 enabled/apply 가드가 막는다. ISSUE-002는 새 차단이 아니라 실패 복원의 재시도 문제다.
+- ShowWindow 반환값은 이전 가시성이라 false 자체를 실패로 지적하지 않았다.
+- 메인 뷰 rect 미복원은 과거 화면좌표/부모좌표 혼용 회귀를 막는 의도적 정책이다. 문서 보장 범위와 구분했다.
+- 정상 업데이트 경로는 서명·허용 URL·크기·버전·해시를 검사하고 헬퍼에 SHA-256을 전달한다. 임의 URL 실행·쉘 문자열 injection으로 오판하지 않았다.
 
 ## 4. High-Risk Issues
 
-### [ISSUE-001] 종료 join timeout 시 진행 중 복원이放棄되고 스냅샷이 소실된다
+요청된 제목을 유지했지만 **Critical/High 이슈는 없다. 아래 3건은 모두 Medium이며 미반증 Confirmed/Likely만 수록했다.**
 
-- **위치:** `rust/crates/kakao-app/src/lib.rs:389-402`, `engine/worker.rs:311-320`, `engine/restore.rs:14-36`
+### [ISSUE-001] 느린 팝업 close가 최초 숨김과 같은 tick의 다른 광고 처리까지 지연시킨다
+
+- **위치:** `rust/crates/kakao-app/src/engine/apply.rs:80-117` / apply_evaluation; `rust/crates/kakao-core/src/evaluate/apply.rs:225-240`.
 - **우선순위:** Medium
-- **신뢰도:** Likely (코드 흐름상 확정적이나 hung 상태의 실기 재현은 못함)
-- **문제:** 종료 시 `join_with_timeout(worker, 3s)`가 타임아웃이면 워커 스레드가 보유한 `EngineCaches`(복원 스냅샷 전체)가 스레드와 함께 버려진다. 복원 자체가 워커의 종료 구간(`drain_restore_all`)에서 수행되므로, 타임아웃 순간 복원 중이던 창은 숨겨진 채로 남는다.
-- **발생 조건:** 종료(또는 업데이트 재시작) 순간 카카오톡 UI 스레드가 응답 없음(`IsHungAppWindow`) 상태여서 동기 `ShowWindow`/`SetWindowPos`가 3초 안에 돌아오지 않을 때. hung 가드는 복원을 "건너뛰고 다음에 재시도"하지만, 종료 시에는 다음이 없으므로 스냅샷이 소멸한다.
-- **영향:** 우리 프로세스가 숨긴 광고창이 카카오톡 재시작 전까지 숨은 채로 남는다. 광고라면 무해하지만, `WM_CLOSE` 거부 팝업의 hide/zero-size fallback으로 숨겨진 정상 팝업이 오탐이었다면 해당 팝업도 복원 없이 남는다(카카오톡 재시작으로 해소).
-- **근거:** `lib.rs:395-401` 타임아웃 분기는 경고만 남기고 종료한다. 스냅샷은 워커 스레드 소유라 join 실패 시 회수 경로가 없다. `restore_snapshot`의 hung 스킵(`restore.rs:42-48`)은 "나중에 재시도"를 전제로 하며 종료 시점과 양립하지 않는다.
-- **반증 확인:** 무한 대기가 더 나쁘다는 점(보이지 않는 프로세스가 mutex를 점유)은 코드 주석과 3초 제한으로 이미 해결되어 있다. 즉 트레이드오프는 의도적이나, 타임아웃 후 "복원放棄를 사용자에게 알리지 않는다"는 점은 남아 있다.
-- **호출/영향 범위:** `run_with_args` 종료 경로 → `spawn_worker` 스레드 → `drain_restore_all` → `restore_all`. 업데이트 재시작 경로(`launch_helper` 전)도 동일하게 영향을 받는다.
-- **권장 수정 방향:** 타임아웃 시 (a) 트레이/로그에 "복원되지 않은 창 N개"를 명시하고, (b) 가능하면 hung이 아닌 창만이라도 메인 스레드에서 best-effort 복원을 시도한 뒤 종료한다. 스냅샷 소유권을 워커 종료 전에 메인으로 넘기는 구조가 가장 깔끔하다.
-- **필요한 회귀 테스트:** hung fake(`is_hung_app_window=true`, 숨김 스냅샷 보유) 상태에서 `join_with_timeout` 타임아웃을 강제했을 때, 종료 경로가 복원放棄를 기록하고 프로세스가 3초 내에 종료됨을 검증한다.
+- **신뢰도:** Likely — close→hide 순서는 코드로 확정. 실제 느린 카카오톡 WndProc의 화면 지연은 이번에 재현하지 않았다.
+- **문제:** close 목록 전체를 순회한 뒤 hide를 처리한다. 팝업은 host와 matched descendant 모두 close/hide/zero-size 후보이므로 host가 살아남고 처리가 느리면 timeout이 누적된다. 광고 판정 완료 뒤에도 창이 표시된 상태다.
+- **발생 조건:** 가드는 통과하지만 WM_CLOSE가 지연되는 창. 완전히 hung으로 감지되기 전의 느린 UI나 close 핸들러 지연도 해당한다.
+- **영향:** 각 실제 timeout이 발생하면 hide 전 대기에 약 500ms씩 추가될 수 있다. 다른 배너 hide·메인 뷰 resize·후속 이벤트도 같은 워커에서 지연된다.
+- **근거:** 앱 apply.rs:84의 동기 send_message_timeout(...,500)은 :105 hide 루프보다 앞선다. core dismiss_popup은 hide를 계획하지만 실행 순서는 바꾸지 못한다. RealWin32::send_message_timeout (`real.rs:210-230`)은 실제 SendMessageTimeoutW를 호출한다.
+- **반증 확인:** PID/identity/hung 가드와 SMTO_ABORTIFHUNG·timeout은 무한 close 대기를 줄인다. 그러나 느린 창을 전부 예측하거나 timeout 전에 hide하지는 않는다. f04 timeout은 즉시 반환하는 fake이며 `close_restore_transitions.rs:223-225`도 이를 명시한다. 이 테스트 통과는 실제 지연을 반증하지 못한다.
+- **호출/영향 범위:** CodeGraph의 spawn_worker→guarded_tick→tick→apply_evaluation, core apply_once→retain_popup→dismiss_popup. 독립 팝업과 같은 tick의 hide/set_pos 대상에 영향. legacy owned 배너 단독 실행에 항상 해당하지는 않는다.
+- **권장 수정 방향:** 검증된 대상의 원래 상태를 먼저 확보하고 빠른 은닉과 느린 close를 분리한다. close 총예산·host/descendant 중복 요청·종료 반응도 설계한다. hide 선행 시 부모 은닉 뒤 자식의 원래 가시성을 잘못 캡처하지 않도록 snapshot을 선행해야 한다. 정상 UI 가드는 유지한다.
+- **필요한 회귀 테스트:** 한 광고 close가 300ms 지연될 때 다른 광고 hide가 대기 전에 실행되는지 확인. host/child 모두 timeout, 즉시 소멸, 거부, delivery failure, stop을 주입하고 snapshot·집계·복원까지 검증. fake 순서와 자체 테스트 창의 실제 대기는 분리한다.
 
-> Critical/High에 해당하는 이슈는 없다. 위 1건이 본 감사의 유일한 Medium이다.
+### [ISSUE-002] OFF에서 복원이 한 번 실패하면 회복해도 OFF 유지 중 재시도하지 않는다
+
+- **위치:** `rust/crates/kakao-app/src/engine/worker.rs:148-170`; `engine/caches.rs:38-53`; `engine/restore.rs:15-32`.
+- **우선순위:** Medium
+- **신뢰도:** Confirmed — production의 도달 가능한 상태 전환으로 확인. 실사용 카카오톡 hung 재현은 하지 않았다.
+- **문제:** 복원은 was_enabled && !enabled_now 전환에서 한 번 실행된다. 실패 snapshot을 보존한 뒤 was_enabled=false가 되고 이후 OFF 반복은 1초 sleep/continue만 한다. 복원 실패 초기화도 bookkeeping만 지우며 OFF 복원을 호출하지 않는다.
+- **발생 조건:** ON에서 숨긴/zero-size한 창이 OFF 순간 hung이거나 복원 API 실패 후 응답 상태로 회복한다.
+- **영향:** 차단을 껐는데도 숨김/zero-size 상태가 남는다. OFF 중 복원 실패 초기화를 눌러도 복구되지 않고 실패 표시만 0이 될 수 있다. 별도 종료 복원 등 추가 경로가 필요하다.
+- **근거:** restore_pending은 실패 snapshot을 다시 저장한다. 그러나 worker.rs:159-170 OFF 유지 중 restore 호출이 없다. 일반 stale 재시도는 tick의 apply 경로에 있어 OFF 분기에서 도달하지 못한다.
+- **반증 확인:** snapshot 보존·ON stale backoff·종료 drain_restore_all_final은 존재하지만 OFF 자동 회복을 보장하지 않는다. failed_restore_keeps_snapshot_and_retries는 테스트가 drain_restore_all을 직접 두 번 호출한다. f03도 수동 drain으로 OFF를 흉내 내므로 워커 반복의 빈틈을 검증하지 못한다.
+- **호출/영향 범위:** ToggleEnabled→update_settings→flags.enabled=false→spawn_worker OFF 전환→drain_restore_all→restore_all→restore_pending. legacy/aggressive hide 및 popup fallback snapshot에 영향.
+- **권장 수정 방향:** OFF에서도 새 차단은 중지하되 pending snapshot 복원만 제한된 주기/백오프로 재시도한다. reset은 OFF에서도 복원을 예약하고 실제 pending 결과로 게이지를 갱신한다.
+- **필요한 회귀 테스트:** ON hide→OFF 첫 복원 실패→응답 회복→OFF 유지 순서를 실제 워커 제어 흐름에서 실행. 새 hide/close 없이 기존 창만 복원되고 snapshot·오류·게이지가 해소되는지 확인. OFF 중 reset도 검증한다.
+
+### [ISSUE-003] 훅의 일시적 설치 실패가 동일 PID에서는 영구 폴링 상태로 남는다
+
+- **위치:** `rust/crates/kakao-app/src/engine/worker.rs:200-210`; `kakao-win32/src/event_hook.rs:73-120`.
+- **우선순위:** Medium
+- **신뢰도:** Confirmed — 실패 이후 재시도 조건 누락은 코드로 확인. 실제 OS 설치 실패를 주입하지 않았다.
+- **문제:** install_for_pids가 None이어도 hooked_pids=pid_set으로 기록한다. 다음 설치 조건은 pid_set != hooked_pids뿐이라 동일 프로세스를 계속 감시하면 재시도하지 않는다.
+- **발생 조건:** 초기/PID 변경 시 훅 API가 일시 실패한 뒤 환경이 회복. OS가 계속 실패하는 경우를 해결할 수 있다는 주장은 아니다.
+- **영향:** 앱/PID 재시작 또는 OFF→ON 전까지 이벤트 처리가 복구되지 않는다. 기본 유휴 폴링 약 200ms와 Weak 확인 지연이 계속 남는다. 트레이에 훅 상태도 없어 성능 저하를 알기 어렵다.
+- **근거:** 실패 warn 뒤 성공 여부와 무관하게 PID 집합을 갱신한다. 별도 retry clock이 없다.
+- **반증 확인:** 훅이 없으면 idle backoff를 끄는 reconcile_interval(...,false)이 있어 차단 전체가 멈추지는 않는다. PID 변경·OFF→ON도 재설치한다. 그러나 동일 PID의 일시 실패 회복은 없다. 기존 훅 재설치 테스트는 직접 install/drop/install이며 워커 실패 스케줄은 커버하지 않는다.
+- **호출/영향 범위:** spawn_worker→EventHook::install_for_pids 실패→reconcile_interval 폴링 fallback→모든 광고 탐지·숨김 지연. 저장 데이터에는 직접 영향이 없다.
+- **권장 수정 방향:** hook.is_none()일 때 제한된 backoff 재설치를 수행하고 성공 집합과 시도 집합을 구분한다. 로그 폭주를 막고 degraded 진단을 노출한다.
+- **필요한 회귀 테스트:** 같은 PID에서 첫 두 번 실패·세 번째 성공 주입. 자동 복구, OFF 중 재시도 중단, 중복 설치 방지, hook/event sender 수명 확인.
 
 ## 5. Potential Functional Gaps
 
-- **[Gap-01] 워커 루프 사망 시 자동 복구 없음 — Likely Gap (Medium).** `WorkerExitGuard`(`worker.rs:27-37`)는 루프 패닉을 `last_error`에 기록만 한다. tick 패닉은 격리되지만 루프 자체가 죽으면 광고 차단이 멈춘 채로 트레이 메시지만 남고, 사용자가 직접 재시작해야 한다. 감시 스레드 또는 루프 재기동이 없다.
-- **[Gap-02] 시작프로그램 토글의 레지스트리 실패가 무음 — Confirmed Gap (Low).** `set_run_command`/`delete_run_command`은 실패 시 `false`만 반환하고(`kakao-win32/src/startup.rs`), `TrayCommand::ToggleStartup`(`lib.rs:244-260`)은 `false`일 때 아무 피드백 없이 무시한다. 메뉴 체크 상태는 그대로라 인지는 가능하지만, 실패 원인을 알 수 없다.
-- **[Gap-03] 팝업 연속 `WM_CLOSE`가 tick을 순차 대기 — Confirmed Gap (Low).** `apply.rs:80-104`는 close 대상마다 `send_message_timeout(500ms)`을 동기 호출한다. 대상이 여러 개면 tick이 최대 500ms×N 묶이며, 그 사이 복원·재스캔이 밀린다. 상한이 있어 손상은 없으나, 광고 팝업이 쏟아지는 순간 반응이 느려진다.
-- **추정 (Low):** 주기적 자동 업데이트 확인이 없고 트레이 수동 메뉴만 있다. 오탐 발생 시 사용자가 덤프를 떠서 전달하는導線이 문서화되어 있지 않다(`--dump-tree` 존재는 README/CLAUDE에 있으나 신고 경로 언급 없음).
+- **GAP-01 / Confirmed Gap — 노출 지연 계측 부족.** WinEvent.time은 수집하지만 워커의 latency 분석에 사용하지 않는다. dump.rs:14-20 timestamp는 초 단위 epoch 문자열이며 series에도 frame별 실제 경과 ms가 없다. 이벤트 수신·판정·최초 hide·tick 소요·대상 분류를 monotonic clock으로 기록해야 20/50/200ms 원인을 구분할 수 있다. 제목/대화 내용은 기록할 필요 없다. 화면 노출 프레임은 영상으로 별도 측정한다.
+- **GAP-02 / Confirmed Gap — 일반 이벤트 뒤 제한된 후속 burst 없음.** burst_scan_iterations는 PID 집합 변경 때만 활성화된다. 일반 광고 이벤트 후 시그니처가 늦게 완성되거나 Weak 확인이 필요할 때 짧은 재확인을 예약하지 않는다. 기능 누락보다 지연 개선점이다. Strong 첫 처리 전 병합 축소와 함께 실측 비교하되 판정 가드는 삭제하지 않는다.
+- **GAP-03 / Confirmed Gap — cold-start와 OFF→ON 깨우기 정책.** 부재 PID 백오프와 OFF 1초 sleep은 전력 절감 의도와 맞지만 즉시 차단 요구와 충돌한다. 선택적 저지연 모드·프로세스 시작 감지·명령 wake-up을 검토할 수 있다. poll_interval_ms만 낮춰도 해결되지 않으며 활성 최소 50ms·유휴 최소 200ms·PID 최소 200ms 제한도 있다.
+- **GAP-04 / Confirmed Gap — 종료 후 복원 snapshot 부재.** 강제 종료·최종 복원 실패·3초 join timeout 뒤 snapshot이 유지되지 않는다. healthy-first 및 경고는 이미 구현됐지만 재시작 후 복구는 없다. 광고 UI 상태 잔존 위험이며 대화 데이터 손실로 확대 해석하지 않는다. 종료 시간 제한을 유지하면서 복구 안내·안전한 복구 전략을 검토한다.
+- **GAP-05 / Confirmed Gap — 업데이트 정상 기동 handshake 없음.** update_executable_with:239-259는 spawn 성공 후 백업을 지운다. 새 프로세스가 바로 실패하는 경우는 rollback 판단 밖이다. 현재 보장 범위는 교체/spawn 실패다. enhancement로 분류하며 현재 릴리스의 실제 기동 실패를 주장하지 않는다.
+- **GAP-06 / 추정 — 추가 KakaoTalk PID 탐지 지연.** 기존 PID가 모두 살아 있으면 전체 재탐색은 30초마다다. 별도 renderer/새 인스턴스가 top-level 광고를 소유하면 늦게 감지할 수 있다. 기존 fixture의 다른 PID renderer 자식은 host hide로 가려지므로 이를 현재 버그로 확정할 수 없다. 실제 프로세스·창 구조 증거가 필요하다.
+
+기본값에서 tokenless 웹뷰를 숨기지 않거나 제목 있는 미허용 팝업을 닫지 않는 것은 정상 기능 보호 계약이다. 광고 누락 버그로 세지 않았다.
 
 ## 6. Documentation Mismatches
 
-실질적인 불일치는 없다. 확인한 내용:
+| 설명 | 실제 구현·정정 필요점 |
+|---|---|
+| README의 광고가 즉시 사라짐·정상 기능 100% 보장 | 20ms 병합·PID 탐색·Weak 확인·느린 API 호출이 있다. 무노출·전 환경 보장 근거는 없다. 지원 범위와 지연 조건을 명시해야 한다. |
+| README의 모든 조정 창 스냅샷·0.1초 완전 복원 | 메인 뷰 resize는 의도적으로 snapshot하지 않는다(apply.rs:129-135, normal_main_view_resize_not_saved_in_restore_snapshots). OFF 반영도 워커 스케줄에 좌우되며 실패/timeout이 있다. 숨김/zero-size 대상 best-effort 복원과 메인 뷰 자체 재레이아웃을 구분해야 한다. |
+| README의 복원 실패 재시도 | ON stale에는 적용되나 OFF 유지에는 미적용(ISSUE-002). 종료 후 영속 retry도 없다. |
+| README 배지·CLAUDE 개요 버전 11.1.5 | Cargo 및 config/paths.rs는 11.1.9다. 실행 버전·Windows 리소스 동기화 테스트는 통과하지만 문구는 낡았다. |
+| docs/COMPATIBILITY.md의 부재 200ms sleep·공격 OFF 즉시 복원·백업 날짜 형식 | 실제 부재는 1~2초 백오프, aggressive 복원은 2 miss tick, Rust 백업은 epoch 형식. CLAUDE의 Rust 전용 설명이 정확하다. |
+| docs/COMPATIBILITY.md의 광범위 PASS | fixture/함수 검증과 실제 플랫폼 E2E를 구분해야 한다. spot 기록만으로 Windows 10/ARM64/DPI별 PASS를 이번에 재확인할 수 없다. |
+| f04 주석의 500ms×N 지연 테스트 예산 설명 | fake timeout은 즉시 반환한다. 테스트 통과는 production 지연 상한의 증거가 아니다. |
 
-- `README.md`의 개발·빌드·테스트 절차(`cargo test/clippy/fmt`, `build_release.ps1 -NoSign` 산출물 목록)는 실제 스크립트·CI와 일치한다.
-- `CLAUDE.md`의 Rust 런타임 동작 절(복원 백오프·BOM hook 범위·스케줄 수치)은 감사한 코드와 일치한다. Python 계약 인용부는 "로컬 전용·Git 미추적"으로 명시되어 있어 오해 소지가 없다.
-- 참고: 감사 지시문에 언급된 `AGENTS.md` 파일은 존재하지 않는다(스킬은 `.agents/skills/`에 있음). 기능 문서가 아니므로 이슈로 올리지 않는다.
-- 참고: 유지된 구 감사 기록(`PROJECT_AUDIT.md` 2026-09-24본의 `specs/002` 링크)은 본 문서로 대체되며, CHANGELOG의 역사 서술은 그대로 둔다.
+CLAUDE가 Python 계약과 Rust 차이를 명시한 부분은 불일치로 다시 지적하지 않았다. AGENTS.md 실파일 부재도 런타임 결함으로 세지 않았다.
 
 ## 7. Recommended Fix Plan
 
 ### Phase 1 — Immediate
 
-- ISSUE-001: 종료 타임아웃 시 복원放棄 명시 + hung이 아닌 창의 best-effort 복원. 스냅샷 소유권을 워커 종료 전 메인으로 이전하는 구조를 검토한다.
-- Gap-01: 워커 루프 사망 감시(heartbeat 또는 join 감시 스레드)와 자동 재기동 또는 "재시작 필요" 트레이 알림을 추가한다.
+Critical/High 데이터 손상·보안 사고 대응이 필요한 발견은 없다. 사용자의 광고 노출 문제를 우선한다.
+
+1. **GAP-01 계측:** owned 배너/독립 팝업, cold-start/탭 복귀/재활성화를 나눠 SHOW→hide 및 화면 노출 p50/p95/max 기록. 원인별 지연을 분리한다.
+2. **ISSUE-001 적용 순서:** snapshot·가드 유지하에 느린 close가 최초 hide를 막지 않게 한다. timeout 숫자를 무작정 낮추는 것보다 은닉과 close 예산 분리가 우선이다.
+3. **ISSUE-002 OFF retry:** OFF 유지 중 pending restore 회복을 보장하고 reset 뒤 잘못된 0건 표시도 고친다.
 
 ### Phase 2 — Stability
 
-- Gap-02: 시작프로그램 토글 실패 시 경고 다이얼로그 또는 상태 문자열에 원인을 노출한다.
-- Gap-03: `WM_CLOSE` 순차 대기를 tick 예산 안에 묶거나(예: tick당 close 상한), 전송 결과를 모아 tick 끝에 보고한다.
-- `update_settings`에 단위 테스트를 추가한다(호출자 2곳 모두 무테스트 — 현재는 `config_migration`의 load/save 경로로만 간접 커버).
+- ISSUE-003: 동일 PID 훅 재설치 backoff·degraded 진단.
+- GAP-02/03: 실측에 따라 Strong 첫 대기 축소, Weak 짧은 확인 burst, 명령 wake-up, 부재 탐색 저지연 옵션 비교. token·클래스·host 가드는 유지한다.
+- 종료/복원 실패의 복구 안내와 상태 일관성 보완. 현재 3초 종료 상한은 유지한다.
+- README/호환성을 실제 보장 범위로 정정하고 fixture PASS와 실기 PASS를 구분한다.
+- 네트워크 timeout(연결 30초·수신 60초·총 90초)은 이미 있다. 자동 retry 부재를 바로 버그로 보지 않으며 필요 시 제한된 재시도 UX를 검토한다.
 
 ### Phase 3 — Structural
 
-- 종료·복원·업데이트 재시작을 "복원 보장 파이프라인"으로 묶어 상태머신화한다(현재는 `lib.rs` 종료 구간에 순차 코드로 분산).
-- 만료 파싱 실패 시 허용(`manifest.rs:115-127`)을 로그로 남겨 자사 빌드 이상을 조기에 감지한다(보안 이슈는 아님).
-- 실데스크톱 `--ignored` 테스트(graph parity·perf probe)의 수동 실행 기록을 남기는 절차를 문서화한다.
+- 프로세스 탐색·clock·hook 설치·wake-up을 주입 가능하게 만들어 실제 worker 분기를 결정적으로 검증한다. 순수 tick 테스트는 유지한다.
+- latency trace와 화면 측정을 결합해 릴리스 지연 회귀 기준을 만든다. fixed sleep 기반 flaky 테스트로 대체하지 않는다.
+- 업데이트 기동 handshake·복구 정책은 별도 범위로 설계한다. 설정 저장/파손 복구는 현재 원자 쓰기를 유지한다.
 
-실제 코드는 수정하지 않는다.
+위 계획은 권고이며 이번 작업에서 구현하지 않았다.
 
 ## 8. Test Recommendations
 
-- **Unit — 종료 복원放棄 기록:** hung fake + 숨김 스냅샷 보유 상태에서 join 타임아웃을 강제하고, (a) 3초 내 종료, (b) 복원放棄 로그/카운터 기록을 단언한다.
-- **Unit — `update_settings`:** 외부 편집된 JSON(유효 필드 1개 변경 + 잘못된 타입 1개)에 토글을 적용하고, 유효 필드 보존·잘못된 필드 기본값 유지·1개 필드만 변경됨을 단언한다.
-- **Integration — 워커 사망 보고:** `guarded_tick` 연속 패닉이 `last_error`와 `consecutive_panics` 백오프를 거쳐 상태에 반영됨을 단언한다(일부는 기존 테스트 존재 — 루프 사망 `Drop` 가드의 발화 조건을 추가).
-- **Integration — 업데이트 실패 시 이전 버전 재실행:** 기존 `kakao-updater` 테스트에 더해, 교체 실패 후 staged 파일이 삭제되고 이전 EXE가 원래 인자로 재실행됨을 단언한다(코드 주석의 계약 그대로).
-- **End-to-End — 토글 롤백:** 설정 파일 쓰기 실패 주입 시 트레이 플래그가 바뀌지 않고 경고가 남음을 단언한다(`ToggleEnabled`/`ToggleAggressive`/`ToggleStartup` 3종).
-- **Concurrency — 토글 연타:** 두 종류 토글을 연속 적용해도 각 변경이 유실되지 않음(디스크 재독+단일 필드 변경의 직렬성)을 단언한다.
-- **Regression — owned popup 골든:** `owned_popup_legacy_ad.json` 회귀가 `GetParent`-owner 경로 변경에 깨짐을 유지한다(이미 존재 — 유지할 것).
-- **Platform-specific — 비Windows fail-fast:** 종료 코드 `2` 단언을 Windows 전용 CI 바깥(예: Linux 잡 또는 단위 수준 `cfg` 테스트)으로 추가한다. 현재 CI는 Windows 전용이라 이 분기가 무테스트다.
+| 유형 | 입력/장애 조건 | 기대 결과 |
+|---|---|---|
+| Unit / ISSUE-001 | host/child close 지연·timeout, 별도 Strong 배너 동시 존재 | snapshot이 hide 전에 확보되고 첫 hide가 close 완료를 기다리지 않음. 소멸 HWND 후속 변이 없음. |
+| Integration / ISSUE-002 | worker ON hide→OFF 첫 복원 실패→응답 회복, OFF 유지 | retry 기한 안에 원래 가시성/크기 복원. 새 hide/close 없음. snapshot·오류·게이지 해소. |
+| Regression / ISSUE-002 | 위 상태에서 OFF 중 복원 실패 초기화 | 게이지 초기화뿐 아니라 retry 예약. 계속 실패하면 실제 실패 상태 재노출. |
+| Unit / ISSUE-003 | 동일 PID 설치 결과 None, None, Some | backoff 뒤 회복, OFF 중 설치 중단, 성공 후 중복 설치 없음. |
+| Integration / GAP-02 | 첫 SHOW에 신호 없음→15/40ms 뒤 자식/텍스트 형성, 후속 이벤트 없는 경우 포함 | Strong은 첫 유효 tick, Weak는 서로 다른 2 tick 뒤 처리. 정상 초기화 웹뷰는 미변이. |
+| Regression / 판정 | owned exact, substring-only, tokenless Chrome, 제목 있는 viewer, unknown title, foreign renderer | 기존 oracle 기대값 유지. 지연 단축으로 확인/host/PID 가드가 사라지지 않음. |
+| Concurrency | 제어 가능한 느린 Win32 호출 중 OFF/stop | 남은 작업·종료 순서 확인. OFF 뒤 새 차단 시작 금지, snapshot 보존, shutdown 상한 유지. |
+| Concurrency / 파일 | 진단 bootstrap과 트레이 저장을 다른 프로세스에서 동시 실행 | JSON 파싱 가능·부분 파일 없음. 완료 설정이 기본값으로 되돌아가지 않음. 외부 편집 보존 범위 명시. |
+| End-to-End / cold | blocker 60초 대기→카카오톡 시작, 반대 시작 순서도 각 30회 이상 | PID 감지·최초 hide·노출 프레임을 각각 기록. 변경 전후 p50/p95/max·CPU 비교, 탐색과 UI 지연 분리. |
+| End-to-End / warm | 30초 idle 뒤 배너·탭 전환·잠금 해제·최소화 복귀·OFF→ON | 정상 이벤트가 1초 poll까지 대기하지 않음. 제어 wake-up/최초 hide 목표 충족. 정상 채팅·뷰어 미변이. |
+| Platform-specific / Win32 | 자체 테스트 창 WndProc 300ms/timeout 지연, 부모·자식·owned 배치 | fake와 실제 호출 순서·지연·취소·snapshot 검증. 실사용 카카오톡 창은 사용하지 않음. |
+| Platform-specific / 화면 | Windows 10/11 x64, 가능 시 ARM64, 100/125/150% DPI·혼합 DPI 모니터 | 경계·뷰 크기·포커스·OFF/종료 복원 확인. 미실행 조합은 NOT RUN. |
+| Integration / 업데이트 | 해시 불일치, 교체 잠금, cross-volume copy 실패, spawn 실패, spawn 직후 종료 | 파일 보존/rollback·staging 정리·인자 재실행 확인. 마지막 조건은 현재 handshake 부재와 분리해 새 계약 설계. |
+| Regression / 설정 | BOM·부분 타입 오류·파손 JSON·읽기/쓰기 거부 | 정상 필드·백업·warning 확인. 실패 토글은 동작/메뉴/디스크 일치. 전용 임시 APPDATA 사용. |
+
+광고 노출 시간은 dump의 interval_ms만으로 계산하지 않는다. frame 실제 경과 ms와 이벤트/적용 trace를 확보한다. 화면은 120fps 이상 녹화 등으로 첫 광고 프레임부터 사라진 프레임까지 세고 측정 오차도 기록한다. warm Strong p95 50ms 같은 값은 **개선 실험의 목표 후보**로 합의할 수 있으나 현재 달성치·보장치가 아니다.
 
 ## 9. Final Assessment
 
-- **Functional Correctness: Good** — 광고 판정·적용·복원의 핵심 경로가 순수 함수+회귀 테스트로 고정되어 있고, 111개 테스트가 전부 통과한다.
-- **Runtime Stability: Acceptable** — tick 격리·백오프·hung 가드가 있으나, 루프 사망 시 자동 복구가 없고 종료 timeout 뒤 복원이放棄된다.
-- **Data Integrity: Good** — 설정 원자 저장+자복구, 업데이트 서명+백업+롤백. 손실 경로를 찾지 못했다.
-- **Error Resilience: Acceptable** — 대부분 경로에 경고·폴백이 있으나, 토글 실패 무음과 종료 복원放棄 무통보가 남는다.
-- **Cross-platform Robustness: Acceptable** — Windows 전용이 명시적 정책이고 fail-fast가 있으나, 비Windows 분기는 무테스트다.
-- **Test Confidence: Good** — 핵심 엔진·복원·설정·업데이터에 회귀 테스트가 있고, CodeGraph 영향 범위와 일치한다. `update_settings` 직접 테스트와 실데스크톱 `--ignored` 항목이 빈틈이다.
+| 항목 | 평가 | 근거 |
+|---|---|---|
+| Functional Correctness | Acceptable | 판정·가드·골든은 통과하나 OFF 복원과 훅 회복에 빈틈. |
+| Runtime Stability | Acceptable | panic 격리·hung guard·종료 상한·중단 알림 존재. 동기 close 지연 가능. |
+| Data Integrity | Good | 대화/DB 비접근, 원자 저장·백업, 서명/해시/교체 백업. 중단 시 UI snapshot 유실은 별도 제한. |
+| Error Resilience | Needs Work | OFF 유지 및 일시 hook 실패에서 자동 회복 단절. |
+| Cross-platform Robustness | Acceptable | Windows 전용·비Windows fail-fast 명확. Windows 버전/DPI/ARM64 전체 실증 부족. |
+| Test Confidence | Acceptable | 157 passed, fmt/clippy 통과. 실 worker 분기·실제 timeout·최초 노출 시간은 suite가 보장하지 않음. |
 
 **실제로 먼저 수정할 문제 3개:**
 
-1. 종료 join timeout 시 복원放棄 기록 + best-effort 복원 (ISSUE-001).
-2. 워커 루프 사망 시 자동 복구 또는 명확한 재시작 유도 (Gap-01).
-3. 시작프로그램 토글 실패 피드백 (Gap-02).
+1. **최초 은닉의 불필요한 대기:** 계측 후 ISSUE-001 close-before-hide 수정. owned 배너는 20ms 병합·후속 확인 정책을 별도 측정해 조정.
+2. **OFF 복원 retry 누락:** ISSUE-002를 고쳐 일시 실패 뒤에도 차단 OFF의 원상 복구 완료.
+3. **동일 PID 훅 설치 실패 미복구:** ISSUE-003에 제한된 재설치·진단을 추가해 지속 폴링 지연 감소.
