@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+의존성 패치 업그레이드. 광고 판정 규칙·알고리즘은 바꾸지 않았다.
+
+### 변경
+- **Rust 패치 업그레이드**: `libc 0.2.190→0.2.191`, `rustls 0.23.45→0.23.46`, `ureq-proto 0.6.4→0.6.5`. 직접 의존성 14종·CI 액션(`@v7`)·Python `cryptography`(50.0.2)는 이미 최신이라 변경 없음. `rust/Cargo.lock`만 갱신.
+- **에디션 2024 보류**: 시험 결과 고정 계약 엔진(`kakao-core`) 수정 4건과 48개 파일 재포맷이 요구되어 의존성 업그레이드 범위 밖으로 판단하고 되돌림.
+
+### 검증
+- `cargo test --workspace` 전체 통과, `clippy -D warnings`·`fmt --check` 통과.
+- `cargo audit` 0 취약점(168 크레이트), `cargo machete` 미사용 의존성 없음.
+- 릴리스 빌드(`kakao-app`·`kakao-updater`) 성공.
+
 ## 11.1.10 - 2026-10-15
 
 - 판정/golden은 유지하고 snapshot→hide/zero-size/resize→bounded close 순서로 변경.
