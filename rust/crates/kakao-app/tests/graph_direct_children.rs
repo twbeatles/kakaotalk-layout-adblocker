@@ -1,6 +1,6 @@
 use kakao_app::graph_build::build_graph;
 use kakao_core::LayoutRules;
-use kakao_core::{evaluate_graph, LayoutSettings};
+use kakao_core::{LayoutSettings, evaluate_graph};
 use kakao_win32::FakeWin32;
 
 const NESTED_TREE: &str = r#"{

@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::config::{ensure_runtime_files, load_rules, load_settings, runtime_paths, VERSION};
+use crate::config::{VERSION, ensure_runtime_files, load_rules, load_settings, runtime_paths};
 
 pub fn run(as_json: bool, report_path: Option<&Path>, strict: bool) -> i32 {
     let paths = runtime_paths();
@@ -85,13 +85,12 @@ pub fn run(as_json: bool, report_path: Option<&Path>, strict: bool) -> i32 {
                 warnings.push(json!("self-check 보고서 경로가 디렉터리입니다."));
             }
         } else {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    if let Err(err) = std::fs::create_dir_all(parent) {
-                        eprintln!("self-check report directory create failed: {err}");
-                        exit_code = 1;
-                    }
-                }
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+                && let Err(err) = std::fs::create_dir_all(parent)
+            {
+                eprintln!("self-check report directory create failed: {err}");
+                exit_code = 1;
             }
             if exit_code == 0 || path.is_file() || !path.exists() {
                 match serde_json::to_vec_pretty(&payload) {

@@ -181,11 +181,11 @@ fn cleanup_broken_backups(path: &Path) {
     backups.retain(|p| {
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let stamp = name.rsplit('-').next().and_then(|s| s.parse::<u64>().ok());
-        if let Some(secs) = stamp {
-            if now.saturating_sub(secs) > BROKEN_BACKUP_MAX_AGE_SECS {
-                let _ = fs::remove_file(p);
-                return false;
-            }
+        if let Some(secs) = stamp
+            && now.saturating_sub(secs) > BROKEN_BACKUP_MAX_AGE_SECS
+        {
+            let _ = fs::remove_file(p);
+            return false;
         }
         true
     });

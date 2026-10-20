@@ -16,11 +16,11 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use kakao_app::config::AppSettings;
-use kakao_app::engine::{tick, EngineCaches, SharedFlags};
+use kakao_app::engine::{EngineCaches, SharedFlags, tick};
 use kakao_core::{LayoutRules, WindowIdentity, WindowText};
 use kakao_win32::{ApiCall, CloseBehavior, FakeWin32, Win32Api};
 

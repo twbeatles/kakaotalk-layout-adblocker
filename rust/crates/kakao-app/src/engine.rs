@@ -25,7 +25,7 @@ mod worker;
 pub use apply::{apply_evaluation, capture_snapshot};
 pub use caches::EngineCaches;
 pub use flags::SharedFlags;
-pub use model::{RestoreSnapshot, StaleState, RESTORE_MISS_THRESHOLD};
+pub use model::{RESTORE_MISS_THRESHOLD, RestoreSnapshot, StaleState};
 pub use restore::restore_all;
 pub use tick::tick;
 pub use worker::{join_with_timeout, spawn_worker};

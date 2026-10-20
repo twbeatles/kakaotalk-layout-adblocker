@@ -8,8 +8,8 @@ use tracing::warn;
 use super::canonical::canonical_payload_python;
 use super::error::UpdateError;
 use super::model::{
-    UpdateManifest, LEGACY_RELEASE_DOWNLOAD_PREFIX, MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES,
-    RELEASE_DOWNLOAD_PREFIX,
+    LEGACY_RELEASE_DOWNLOAD_PREFIX, MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES,
+    RELEASE_DOWNLOAD_PREFIX, UpdateManifest,
 };
 use super::version::is_newer;
 use crate::config::UPDATE_PUBLIC_KEY_B64;

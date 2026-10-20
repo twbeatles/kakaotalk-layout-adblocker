@@ -1,4 +1,4 @@
-use kakao_updater::{update_executable, HelperError};
+use kakao_updater::{HelperError, update_executable};
 use std::fs;
 use std::time::Duration;
 
@@ -123,7 +123,7 @@ fn relaunch_previous_needs_an_existing_file_and_discard_removes_staging() {
 
 #[test]
 fn readiness_failure_rolls_back_and_success_releases_backup() {
-    use kakao_updater::{update_executable_with, UpdateOptions};
+    use kakao_updater::{UpdateOptions, update_executable_with};
     for mode in ["exit", "timeout", "ack"] {
         // Copy only this test executable into an isolated test-owned directory.
         let dir =

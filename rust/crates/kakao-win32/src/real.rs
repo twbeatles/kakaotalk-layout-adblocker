@@ -3,17 +3,18 @@
 use std::cell::RefCell;
 
 use kakao_core::{Rect, WindowText};
-use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WIN32_ERROR, WPARAM};
 use windows::Win32::Graphics::Gdi::UpdateWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, EnumWindows, GetClassNameW, GetClientRect, GetParent, GetWindowLongPtrW,
-    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsHungAppWindow,
-    IsWindow, IsWindowVisible, SendMessageTimeoutW, SetWindowPos, ShowWindow, GWL_STYLE,
-    SEND_MESSAGE_TIMEOUT_FLAGS, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, WS_VISIBLE,
+    EnumChildWindows, EnumWindows, GWL_STYLE, GetClassNameW, GetClientRect, GetParent,
+    GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsHungAppWindow, IsWindow, IsWindowVisible,
+    SEND_MESSAGE_TIMEOUT_FLAGS, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, SendMessageTimeoutW,
+    SetWindowPos, ShowWindow, WS_VISIBLE,
 };
+use windows::core::BOOL;
 
-use crate::api::{window_text_from_length_and_copy, Win32Api, SMTO_ABORTIFHUNG};
+use crate::api::{SMTO_ABORTIFHUNG, Win32Api, window_text_from_length_and_copy};
 
 thread_local! {
     static ENUM_ACCUM: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };

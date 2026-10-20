@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, MsgWaitForMultipleObjects, PeekMessageW, TranslateMessage,
-    EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE,
-    EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND, MSG, PM_REMOVE,
-    QS_ALLINPUT, WINEVENT_OUTOFCONTEXT, WM_QUIT,
+    DispatchMessageW, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE,
+    EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW,
+    EVENT_SYSTEM_FOREGROUND, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
+    TranslateMessage, WINEVENT_OUTOFCONTEXT, WM_QUIT,
 };
 
 const OBJID_WINDOW: i32 = 0;

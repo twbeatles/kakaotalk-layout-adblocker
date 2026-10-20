@@ -125,9 +125,12 @@ mod tests {
         let frames = value["frames"].as_array().unwrap();
         assert!(!frames.is_empty()); // A slow PID scan may consume the requested duration in one frame.
         assert!(frames.iter().all(|f| f["capture_us"].is_u64()));
-        assert!(frames
-            .windows(2)
-            .all(|w| w[0]["elapsed_ms"].as_f64().unwrap() <= w[1]["elapsed_ms"].as_f64().unwrap()));
+        assert!(
+            frames
+                .windows(2)
+                .all(|w| w[0]["elapsed_ms"].as_f64().unwrap()
+                    <= w[1]["elapsed_ms"].as_f64().unwrap())
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

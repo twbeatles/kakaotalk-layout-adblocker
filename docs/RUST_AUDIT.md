@@ -54,6 +54,8 @@ cargo가 stderr로 진행 상황을 출력해서 PowerShell이 `NativeCommandErr
 
 ## 점검 이력
 
+- **2026-10-20**: Edition 2024 마이그레이션 완료. 워크스페이스 `edition = "2024"` + `rust-version = "1.88"` 선언(4개 크레이트 상속). `unsafe_op_in_unsafe_fn` 대응(Win32 호출 19곳 내부 `unsafe {}` 블록, `remove_var`/`set_var` SAFETY 주석), clippy `collapsible_if` 17곳 let-chain 병합, rustfmt 2024 스타일 적용. 직접 의존성 14종은 메이저 포함 최신이라 변경 없고, transitive 패치 3건(`cc→1.9.0`, `find-msvc-tools→0.1.15`, `webpki-roots→1.0.10`)만 `Cargo.lock` 갱신. `cargo audit` 0 취약점(168 크레이트), `cargo machete` 이상 없음, `test` 170 passed / 0 failed, `clippy -D warnings`·`fmt --check`·릴리스 빌드 통과.
+
 - **2026-10-14**: 의존성 전면 업그레이드. major 5건(`base64→0.23`,
   `sha2→0.11`, `ed25519-dalek→3`, `windows→0.62`, `ureq 2→3`) + 호환 31건.
   `ureq 3`는 `updater/http.rs` 어댑터(`Config::builder`, `into_body()` 경유)로

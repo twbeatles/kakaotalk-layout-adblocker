@@ -1,7 +1,7 @@
 use std::collections::HashSet;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::Ordering;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,7 +13,7 @@ use super::caches::EngineCaches;
 use super::flags::SharedFlags;
 use super::model::ACTIVE_WINDOW;
 use super::restore::report_restore;
-use super::schedule::{pid_scan_interval, reconcile_interval, ABSENT_MAX_WAIT};
+use super::schedule::{ABSENT_MAX_WAIT, pid_scan_interval, reconcile_interval};
 use super::tick::tick;
 use crate::config::AppSettings;
 
@@ -488,9 +488,11 @@ mod runtime_tests {
         assert_eq!(flags.restore_failures.load(Ordering::SeqCst), 0);
         flags.stopping.store(true, Ordering::SeqCst);
         flags.notify_control();
-        assert!(join_with_timeout(handle, Duration::from_secs(1))
-            .unwrap()
-            .is_ok());
+        assert!(
+            join_with_timeout(handle, Duration::from_secs(1))
+                .unwrap()
+                .is_ok()
+        );
     }
     #[test]
     fn real_worker_off_reset_recovers_without_new_hides() {
@@ -530,9 +532,11 @@ mod runtime_tests {
         wait_until(|| !flags.hook_degraded.load(Ordering::SeqCst));
         flags.stopping.store(true, Ordering::SeqCst);
         flags.notify_control();
-        assert!(join_with_timeout(handle, Duration::from_secs(1))
-            .unwrap()
-            .is_ok());
+        assert!(
+            join_with_timeout(handle, Duration::from_secs(1))
+                .unwrap()
+                .is_ok()
+        );
     }
 }
 

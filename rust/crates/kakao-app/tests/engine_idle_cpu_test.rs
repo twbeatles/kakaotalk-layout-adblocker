@@ -1,10 +1,10 @@
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use kakao_app::config::AppSettings;
-use kakao_app::engine::{spawn_worker, SharedFlags};
+use kakao_app::engine::{SharedFlags, spawn_worker};
 use kakao_core::LayoutRules;
 use kakao_win32::FakeWin32;
 

@@ -1,15 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use kakao_core::WindowIdentity;
-use kakao_win32::api::{Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_SHOW};
+use kakao_win32::api::{SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, Win32Api};
 use tracing::warn;
 
 use super::apply::identity_matches;
 use super::caches::EngineCaches;
 use super::flags::SharedFlags;
 use super::model::{
-    RestoreSnapshot, StaleState, RESTORE_GIVEUP_COOLDOWN_TICKS, RESTORE_MAX_ATTEMPTS,
-    RESTORE_MISS_THRESHOLD,
+    RESTORE_GIVEUP_COOLDOWN_TICKS, RESTORE_MAX_ATTEMPTS, RESTORE_MISS_THRESHOLD, RestoreSnapshot,
+    StaleState,
 };
 
 fn restore_pending(
@@ -79,23 +79,24 @@ fn restore_snapshot(api: &dyn Win32Api, snap: &RestoreSnapshot, last_error: &mut
         return false;
     }
     let mut ok = true;
-    if let Some(rect) = snap.rect {
-        if rect.width() > 0 && rect.height() > 0 {
-            let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
-            if !snap.top_level {
-                flags |= SWP_NOMOVE;
-            }
-            if !api.set_window_pos(
-                snap.identity.hwnd,
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                flags,
-            ) {
-                ok = false;
-                *last_error = format!("restore pos failed hwnd={}", snap.identity.hwnd);
-            }
+    if let Some(rect) = snap.rect
+        && rect.width() > 0
+        && rect.height() > 0
+    {
+        let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+        if !snap.top_level {
+            flags |= SWP_NOMOVE;
+        }
+        if !api.set_window_pos(
+            snap.identity.hwnd,
+            rect.left,
+            rect.top,
+            rect.width(),
+            rect.height(),
+            flags,
+        ) {
+            ok = false;
+            *last_error = format!("restore pos failed hwnd={}", snap.identity.hwnd);
         }
     }
     if snap.was_visible {

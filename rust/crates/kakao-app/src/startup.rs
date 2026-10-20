@@ -122,14 +122,12 @@ fn is_managed_command(command: &str, expected: &str) -> bool {
     if path_file_name(path).is_some_and(|name| name.eq_ignore_ascii_case(PACKAGED_EXE_NAME)) {
         return true;
     }
-    if let Some(expected_path) = command_exe_path(expected) {
-        if let (Some(actual_name), Some(expected_name)) =
+    if let Some(expected_path) = command_exe_path(expected)
+        && let (Some(actual_name), Some(expected_name)) =
             (path_file_name(path), path_file_name(expected_path))
-        {
-            if actual_name.eq_ignore_ascii_case(expected_name) {
-                return true;
-            }
-        }
+        && actual_name.eq_ignore_ascii_case(expected_name)
+    {
+        return true;
     }
     false
 }

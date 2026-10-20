@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use kakao_app::config::{load_rules, load_settings, save_settings, AppSettings};
+use kakao_app::config::{AppSettings, load_rules, load_settings, save_settings};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -58,9 +58,11 @@ fn legacy_rules_v11_overlay_and_bounds_correction() {
     let (corrected_rules, corr_warnings) = load_rules(&inverted_path);
     assert_eq!(corrected_rules.banner_min_height_px, 50);
     assert_eq!(corrected_rules.banner_max_height_px, 300);
-    assert!(corr_warnings
-        .iter()
-        .any(|w| w.contains("역전되어 자동 교정")));
+    assert!(
+        corr_warnings
+            .iter()
+            .any(|w| w.contains("역전되어 자동 교정"))
+    );
 }
 
 #[test]
@@ -173,9 +175,11 @@ fn typed_rules_null_and_bad_array_keep_defaults() {
     .unwrap();
     let (rules, warnings) = load_rules(&path);
     assert!(warnings.iter().any(|w| w.contains("popup_ad_classes")));
-    assert!(warnings
-        .iter()
-        .any(|w| w.contains("popup_host_text_contains")));
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("popup_host_text_contains"))
+    );
     assert_eq!(rules.popup_ad_classes, vec!["AdFitWebView".to_string()]);
     assert!(rules.popup_host_text_contains.is_empty());
     assert_eq!(rules.weak_signal_confirm_ticks, -1);

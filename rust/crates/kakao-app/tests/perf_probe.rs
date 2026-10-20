@@ -13,7 +13,7 @@ fn reconciliation_cost_breakdown() {
     use std::time::Instant;
 
     use kakao_app::graph_build::build_graph;
-    use kakao_core::{evaluate_graph_for_apply, LayoutRules, LayoutSettings};
+    use kakao_core::{LayoutRules, LayoutSettings, evaluate_graph_for_apply};
     use kakao_win32::{RealWin32, Win32Api};
 
     let api = RealWin32::new();

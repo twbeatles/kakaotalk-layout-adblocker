@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use kakao_app::config::{atomic_write, rotate_log_if_needed, rotated_log_path, RotatingLog};
+use kakao_app::config::{RotatingLog, atomic_write, rotate_log_if_needed, rotated_log_path};
 use tracing_subscriber::fmt::MakeWriter;
 
 fn temp_dir(tag: &str) -> PathBuf {

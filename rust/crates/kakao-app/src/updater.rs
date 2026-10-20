@@ -23,8 +23,8 @@ pub use error::UpdateError;
 pub use http::{check_for_update, download_and_verify, sha256_hex};
 pub use manifest::{expected_artifact_url, is_valid_artifact_url, parse_and_verify_manifest};
 pub use model::{
-    StagedUpdate, UpdateManifest, LEGACY_RELEASE_DOWNLOAD_PREFIX, MANIFEST_URL,
-    RELEASE_DOWNLOAD_PREFIX, USER_AGENT,
+    LEGACY_RELEASE_DOWNLOAD_PREFIX, MANIFEST_URL, RELEASE_DOWNLOAD_PREFIX, StagedUpdate,
+    USER_AGENT, UpdateManifest,
 };
 pub use staging::{
     apply_update, discard_staged, end_update, launch_helper, prepare_update, relaunch_args_from,

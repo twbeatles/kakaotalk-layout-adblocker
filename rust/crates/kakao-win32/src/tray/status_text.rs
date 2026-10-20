@@ -49,11 +49,7 @@ pub fn status_menu_lines(snapshot: &StatusSnapshot) -> Vec<String> {
 }
 
 fn on_off(value: bool) -> &'static str {
-    if value {
-        "ON"
-    } else {
-        "OFF"
-    }
+    if value { "ON" } else { "OFF" }
 }
 
 fn truncate_utf16(text: &str, max_units: usize) -> String {

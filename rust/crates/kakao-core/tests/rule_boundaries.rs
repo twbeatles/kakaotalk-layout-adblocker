@@ -19,8 +19,8 @@ use kakao_core::signals::{
     update_candidate_state,
 };
 use kakao_core::{
-    evaluate_graph_with_states, CandidateState, LayoutRules, LayoutSettings, Rect, WindowGraph,
-    WindowNode, WindowText,
+    CandidateState, LayoutRules, LayoutSettings, Rect, WindowGraph, WindowNode, WindowText,
+    evaluate_graph_with_states,
 };
 
 fn rect(l: i32, t: i32, r: i32, b: i32) -> Rect {

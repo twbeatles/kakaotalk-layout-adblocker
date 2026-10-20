@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use kakao_app::config::AppSettings;
-use kakao_app::engine::{tick, EngineCaches, SharedFlags};
+use kakao_app::engine::{EngineCaches, SharedFlags, tick};
 use kakao_core::LayoutRules;
 use kakao_win32::{FakeWin32, Win32Api};
 
@@ -78,10 +78,12 @@ fn hidden_ad_restored_on_disable() {
     let ad_hwnd = 527936;
     assert!(eval.actions.hide.contains(&ad_hwnd));
     assert!(!api.is_window_visible(ad_hwnd));
-    assert!(caches
-        .snapshots
-        .values()
-        .any(|s| s.identity.hwnd == ad_hwnd));
+    assert!(
+        caches
+            .snapshots
+            .values()
+            .any(|s| s.identity.hwnd == ad_hwnd)
+    );
 
     // Disable blocker -> restore_all
     flags.enabled.store(false, Ordering::SeqCst);
@@ -110,10 +112,12 @@ fn stale_hide_restored_after_two_miss_ticks() {
     // Tick 1: ad matches and gets hidden
     tick(&api, &pids, &settings, &rules, &mut caches, &flags);
     assert!(!api.is_window_visible(ad_hwnd));
-    assert!(caches
-        .snapshots
-        .values()
-        .any(|s| s.identity.hwnd == ad_hwnd));
+    assert!(
+        caches
+            .snapshots
+            .values()
+            .any(|s| s.identity.hwnd == ad_hwnd)
+    );
 
     // Change ad window text to non-ad (e.g. Chat room title)
     api.set_text(ad_hwnd, "프로그래밍 토크방");
@@ -240,10 +244,12 @@ fn failed_restore_keeps_snapshot_and_retries() {
 
     tick(&api, &pids, &settings, &rules, &mut caches, &flags);
     assert!(!api.is_window_visible(ad_hwnd));
-    assert!(caches
-        .snapshots
-        .values()
-        .any(|s| s.identity.hwnd == ad_hwnd));
+    assert!(
+        caches
+            .snapshots
+            .values()
+            .any(|s| s.identity.hwnd == ad_hwnd)
+    );
 
     api.set_fail_show_window(ad_hwnd, true);
     api.set_fail_set_window_pos(ad_hwnd, true);
@@ -263,10 +269,12 @@ fn failed_restore_keeps_snapshot_and_retries() {
     let (failures, err) = caches.drain_restore_all(&api);
     assert_eq!(failures, 0, "retry restore failed: {err}");
     assert!(api.is_window_visible(ad_hwnd));
-    assert!(!caches
-        .snapshots
-        .values()
-        .any(|s| s.identity.hwnd == ad_hwnd));
+    assert!(
+        !caches
+            .snapshots
+            .values()
+            .any(|s| s.identity.hwnd == ad_hwnd)
+    );
 }
 
 #[test]

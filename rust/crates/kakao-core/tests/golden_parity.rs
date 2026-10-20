@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use kakao_core::{evaluate_dump, GoldenFile, LayoutRules};
+use kakao_core::{GoldenFile, LayoutRules, evaluate_dump};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

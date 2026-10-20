@@ -1,14 +1,14 @@
 #![cfg(windows)]
 
-use kakao_win32::api::{Win32Api, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOW};
 use kakao_win32::RealWin32;
-use windows::core::w;
+use kakao_win32::api::{SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOZORDER, Win32Api};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, CS_HREDRAW, CS_VREDRAW,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW,
     WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
+use windows::core::w;
 
 unsafe extern "system" fn smoke_wnd_proc(
     hwnd: HWND,

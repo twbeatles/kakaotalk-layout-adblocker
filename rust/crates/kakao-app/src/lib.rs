@@ -12,7 +12,7 @@ pub mod startup_repair;
 pub mod updater;
 
 // `main.rs` (`kakao_app::{Args, ...}`)와의 호환을 위해 CLI 표면을 루트에 유지.
-pub use args::{should_attach_parent_console, Args};
+pub use args::{Args, should_attach_parent_console};
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,7 +23,7 @@ use config::{ensure_runtime_files, load_rules, load_settings, runtime_paths};
 
 /// How long shutdown waits for the engine worker to restore windows and exit.
 const WORKER_STOP_TIMEOUT: Duration = Duration::from_secs(3);
-use engine::{spawn_worker, tick, EngineCaches, SharedFlags};
+use engine::{EngineCaches, SharedFlags, spawn_worker, tick};
 
 pub fn run_with_args(args: Args) -> i32 {
     if !cfg!(windows) {
@@ -37,7 +37,11 @@ pub fn run_with_args(args: Args) -> i32 {
     // Consume the helper-owned acknowledgment path once; do not pass it to
     // unrelated subprocesses or future updater launches through inheritance.
     let update_ready = std::env::var_os("KAKAO_UPDATE_READY_FILE").map(std::path::PathBuf::from);
-    std::env::remove_var("KAKAO_UPDATE_READY_FILE");
+    // SAFETY: still single-threaded during startup; the engine worker and any
+    // other threads spawn below, and nothing else touches this variable.
+    unsafe {
+        std::env::remove_var("KAKAO_UPDATE_READY_FILE");
+    }
     let paths = runtime_paths();
     let _ = std::fs::create_dir_all(&paths.appdata_dir);
 
@@ -232,7 +236,7 @@ pub fn run_with_args(args: Args) -> i32 {
 
         use kakao_win32::tray::{TrayCommand, TrayFlags, TrayStatus};
 
-        use crate::config::{update_settings, VERSION};
+        use crate::config::{VERSION, update_settings};
 
         let flags_for_tray = flags.clone();
         let settings_path = paths.settings_file.clone();
@@ -399,12 +403,11 @@ pub fn run_with_args(args: Args) -> i32 {
                                 }
                                 std::thread::sleep(Duration::from_millis(10));
                             }
-                            if !ready_flags.stopping.load(Ordering::SeqCst) {
-                                if let Err(err) =
+                            if !ready_flags.stopping.load(Ordering::SeqCst)
+                                && let Err(err) =
                                     std::fs::write(path, std::process::id().to_string())
-                                {
-                                    tracing::warn!(%err, "update readiness acknowledgment failed");
-                                }
+                            {
+                                tracing::warn!(%err, "update readiness acknowledgment failed");
                             }
                         });
                     }
@@ -517,11 +520,7 @@ pub fn run_with_args(args: Args) -> i32 {
             }
         }
     }
-    if join_ok {
-        0
-    } else {
-        1
-    }
+    if join_ok { 0 } else { 1 }
 }
 
 /// Latch for the worker watchdog: report an unexpected worker exit exactly

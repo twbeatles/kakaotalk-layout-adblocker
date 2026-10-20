@@ -360,7 +360,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
   - 윈도우 계층 트리 모델링, 레이아웃 수식 계산, 광고 시그널 평가.
   - Golden Parity 회귀 테스트를 통해 이전 Python 버전과 100% 동일한 판정 결과를 내는지 검증.
 - **`crates/kakao-win32`**:
-  - `windows` 0.61 크레이트를 이용한 순수 Win32 API 추상화 계층.
+  - `windows` 0.62 크레이트를 이용한 순수 Win32 API 추상화 계층.
   - `SetWinEventHook` 실시간 이벤트 훅, 단일 인스턴스 Named Mutex, 시작프로그램 레지스트리 관리.
   - 경량 Win32 네이티브 트레이 메뉴(`Shell_NotifyIconW`, `TrackPopupMenu`).
   - 테스트용 `FakeWin32` 목(Mock) 엔진 내장.
@@ -374,7 +374,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 
 ### 빌드 환경 준비
 - Windows 10 / 11 (64-bit)
-- Rust Stable (`rustup default stable-x86_64-pc-windows-msvc`)
+- Rust Stable 1.88+ (`rustup default stable-x86_64-pc-windows-msvc`, Edition 2024)
 
 ```powershell
 # 저장소 클론

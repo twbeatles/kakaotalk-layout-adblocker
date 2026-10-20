@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use chrono_lite::now_rfc3339;
 use kakao_core::{
-    evaluate_graph_with_states, CandidateState, Evaluation, LayoutRules, LayoutSettings,
-    WindowGraph, WindowIdentity, WindowText,
+    CandidateState, Evaluation, LayoutRules, LayoutSettings, WindowGraph, WindowIdentity,
+    WindowText, evaluate_graph_with_states,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::graph_build::build_graph;
 use kakao_win32::Win32Api;

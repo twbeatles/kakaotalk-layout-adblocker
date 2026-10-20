@@ -19,8 +19,8 @@ mod state;
 mod status_text;
 
 pub use command::{
-    TrayCommand, ID_CHECK_UPDATE, ID_EXIT, ID_OPEN_LOGS, ID_OPEN_RELEASES, ID_RESET_RESTORE,
-    ID_TOGGLE_AGGRESSIVE, ID_TOGGLE_ENABLED, ID_TOGGLE_STARTUP,
+    ID_CHECK_UPDATE, ID_EXIT, ID_OPEN_LOGS, ID_OPEN_RELEASES, ID_RESET_RESTORE,
+    ID_TOGGLE_AGGRESSIVE, ID_TOGGLE_ENABLED, ID_TOGGLE_STARTUP, TrayCommand,
 };
 pub use host::{request_exit, run_loop, run_loop_with_ready};
 pub use menu::shell_open;

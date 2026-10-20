@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use kakao_core::{Evaluation, WindowGraph, WindowIdentity};
-use kakao_win32::api::{Win32Api, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, WM_CLOSE};
+use kakao_win32::api::{SW_HIDE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, Win32Api};
 use tracing::debug;
 
 use super::flags::SharedFlags;

@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use kakao_core::{
-    evaluate_graph_for_apply, evaluate_graph_with_states, Evaluation, LayoutRules, WindowGraph,
-    WindowIdentity,
+    Evaluation, LayoutRules, WindowGraph, WindowIdentity, evaluate_graph_for_apply,
+    evaluate_graph_with_states,
 };
 use kakao_win32::api::Win32Api;
 use tracing::info;

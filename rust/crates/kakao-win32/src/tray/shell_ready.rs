@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
-use windows::core::w;
-use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIM_ADD, NOTIFYICONDATAW};
+use windows::Win32::UI::Shell::{NIM_ADD, NOTIFYICONDATAW, Shell_NotifyIconW};
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+use windows::core::w;
 
 pub fn wait_for_shell_ready_with(
     timeout: Duration,

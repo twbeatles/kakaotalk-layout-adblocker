@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use kakao_core::{Rect, WindowText};
 use serde::Deserialize;
 
-use crate::api::{Win32Api, SW_HIDE, SW_SHOW, WM_CLOSE};
+use crate::api::{SW_HIDE, SW_SHOW, WM_CLOSE, Win32Api};
 
 /// What a per-window `WM_CLOSE` injection does. The default
 /// (`DeliveredButAlive`) preserves the historical fake behavior — delivery
@@ -321,12 +321,11 @@ impl FakeWin32 {
         visible: bool,
     ) {
         self.with(|inner| {
-            if parent != 0 {
-                if let Some(siblings) = inner.children.get_mut(&parent) {
-                    if !siblings.contains(&hwnd) {
-                        siblings.push(hwnd);
-                    }
-                }
+            if parent != 0
+                && let Some(siblings) = inner.children.get_mut(&parent)
+                && !siblings.contains(&hwnd)
+            {
+                siblings.push(hwnd);
             }
             inner.children.entry(hwnd).or_default();
             inner.windows.insert(
@@ -562,13 +561,11 @@ impl Win32Api for FakeWin32 {
                 inner.restore_order.push(hwnd);
             }
             let succeeded = !inner.fail_show.contains(&hwnd) && inner.windows.contains_key(&hwnd);
-            if succeeded {
-                if let Some(rec) = inner.windows.get_mut(&hwnd) {
-                    if cmd == SW_HIDE {
-                        rec.visible = false;
-                    } else if cmd == SW_SHOW {
-                        rec.visible = true;
-                    }
+            if succeeded && let Some(rec) = inner.windows.get_mut(&hwnd) {
+                if cmd == SW_HIDE {
+                    rec.visible = false;
+                } else if cmd == SW_SHOW {
+                    rec.visible = true;
                 }
             }
             inner.api_calls.push(ApiCall::new(
@@ -593,31 +590,29 @@ impl Win32Api for FakeWin32 {
         self.with(|inner| {
             let succeeded =
                 !inner.fail_set_pos.contains(&hwnd) && inner.windows.contains_key(&hwnd);
-            if succeeded {
-                if let Some(rec) = inner.windows.get_mut(&hwnd) {
-                    let nomove = flags & crate::api::SWP_NOMOVE != 0;
-                    let nosize = flags & crate::api::SWP_NOSIZE != 0;
-                    if let Some(rect) = rec.rect.as_mut() {
-                        if !nomove {
-                            let w = rect.width();
-                            let h = rect.height();
-                            rect.left = x;
-                            rect.top = y;
-                            rect.right = x + w;
-                            rect.bottom = y + h;
-                        }
-                        if !nosize {
-                            rect.right = rect.left + width;
-                            rect.bottom = rect.top + height;
-                        }
-                    } else {
-                        rec.rect = Some(Rect {
-                            left: x,
-                            top: y,
-                            right: x + width,
-                            bottom: y + height,
-                        });
+            if succeeded && let Some(rec) = inner.windows.get_mut(&hwnd) {
+                let nomove = flags & crate::api::SWP_NOMOVE != 0;
+                let nosize = flags & crate::api::SWP_NOSIZE != 0;
+                if let Some(rect) = rec.rect.as_mut() {
+                    if !nomove {
+                        let w = rect.width();
+                        let h = rect.height();
+                        rect.left = x;
+                        rect.top = y;
+                        rect.right = x + w;
+                        rect.bottom = y + h;
                     }
+                    if !nosize {
+                        rect.right = rect.left + width;
+                        rect.bottom = rect.top + height;
+                    }
+                } else {
+                    rec.rect = Some(Rect {
+                        left: x,
+                        top: y,
+                        right: x + width,
+                        bottom: y + height,
+                    });
                 }
             }
             inner.api_calls.push(ApiCall::new(

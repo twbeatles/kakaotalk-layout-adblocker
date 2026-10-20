@@ -1,13 +1,13 @@
 use std::sync::atomic::Ordering;
 
-use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Shell::NOTIFYICONDATAW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, LoadIconW, SetForegroundWindow,
-    TrackPopupMenu, HMENU, IDI_APPLICATION, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-    TPM_RIGHTBUTTON,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU, IDI_APPLICATION, LoadIconW,
+    MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, SetForegroundWindow, TPM_RIGHTBUTTON,
+    TrackPopupMenu,
 };
+use windows::core::{PCWSTR, w};
 
 use super::command::{
     ID_CHECK_UPDATE, ID_EXIT, ID_OPEN_LOGS, ID_OPEN_RELEASES, ID_RESET_RESTORE,
@@ -24,7 +24,8 @@ fn app_icon_resource() -> PCWSTR {
 }
 
 pub(super) unsafe fn show_menu(hwnd: windows::Win32::Foundation::HWND, host: &TrayHost) {
-    let Ok(menu) = CreatePopupMenu() else {
+    let menu = unsafe { CreatePopupMenu() };
+    let Ok(menu) = menu else {
         return;
     };
     let snapshot = StatusSnapshot::capture(&host.flags, &host.status);
@@ -72,10 +73,10 @@ pub(super) unsafe fn show_menu(hwnd: windows::Win32::Foundation::HWND, host: &Tr
     append(menu, ID_EXIT, "종료", false, true);
 
     let mut pt = POINT::default();
-    let _ = GetCursorPos(&mut pt);
-    let _ = SetForegroundWindow(hwnd);
-    let _ = TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, None, hwnd, None);
-    let _ = DestroyMenu(menu);
+    let _ = unsafe { GetCursorPos(&mut pt) };
+    let _ = unsafe { SetForegroundWindow(hwnd) };
+    let _ = unsafe { TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, None, hwnd, None) };
+    let _ = unsafe { DestroyMenu(menu) };
 }
 
 fn append(menu: HMENU, id: u32, text: &str, checked: bool, enabled: bool) {

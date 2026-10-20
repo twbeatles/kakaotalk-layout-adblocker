@@ -21,7 +21,12 @@ fn isolated_appdata() -> std::path::PathBuf {
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("APPDATA", &dir);
+    // SAFETY: every test in this file holds `APPDATA_GUARD` while calling
+    // `isolated_appdata`, so no other thread in this process touches the
+    // environment concurrently; the env block itself is per-process.
+    unsafe {
+        std::env::set_var("APPDATA", &dir);
+    }
     dir
 }
 

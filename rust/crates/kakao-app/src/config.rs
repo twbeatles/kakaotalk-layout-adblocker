@@ -13,12 +13,12 @@ mod settings;
 mod storage;
 
 pub use log::{
-    rotate_log_if_needed, rotated_log_path, RotatingLog, RotatingLogWriter, LOG_ROTATE_BYTES,
+    LOG_ROTATE_BYTES, RotatingLog, RotatingLogWriter, rotate_log_if_needed, rotated_log_path,
 };
 pub use paths::runtime_paths;
 pub use paths::{
-    RuntimePaths, APPDATA_DIRNAME, LOG_FILE, RULES_FILE, SETTINGS_FILE, UPDATE_PUBLIC_KEY_B64,
+    APPDATA_DIRNAME, LOG_FILE, RULES_FILE, RuntimePaths, SETTINGS_FILE, UPDATE_PUBLIC_KEY_B64,
     VERSION,
 };
-pub use settings::{load_settings, save_settings, update_settings, AppSettings};
+pub use settings::{AppSettings, load_settings, save_settings, update_settings};
 pub use storage::{atomic_write, ensure_runtime_files, load_rules};

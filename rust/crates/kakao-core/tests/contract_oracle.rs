@@ -13,8 +13,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use kakao_core::{
-    evaluate_graph_with_states, CandidateState, LayoutRules, LayoutSettings, WindowGraph,
-    WindowIdentity,
+    CandidateState, LayoutRules, LayoutSettings, WindowGraph, WindowIdentity,
+    evaluate_graph_with_states,
 };
 use serde::Deserialize;
 

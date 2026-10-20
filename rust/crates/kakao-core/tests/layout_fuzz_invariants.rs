@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 
 use kakao_core::{
-    evaluate_graph_with_states, CandidateState, LayoutRules, LayoutSettings, Rect, WindowGraph,
-    WindowIdentity, WindowNode, WindowText,
+    CandidateState, LayoutRules, LayoutSettings, Rect, WindowGraph, WindowIdentity, WindowNode,
+    WindowText, evaluate_graph_with_states,
 };
 
 // --- minimal deterministic RNG (xorshift64*) --------------------------------

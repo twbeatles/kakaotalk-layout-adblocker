@@ -1,7 +1,7 @@
 #[cfg(windows)]
 pub fn show_info_box(title: &str, text: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{MB_ICONINFORMATION, MB_OK, MessageBoxW};
     use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
     unsafe {
         let _ = MessageBoxW(
             None,
@@ -14,8 +14,8 @@ pub fn show_info_box(title: &str, text: &str) {
 
 #[cfg(windows)]
 pub fn show_error_box(title: &str, text: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
     use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
     unsafe {
         let _ = MessageBoxW(
             None,
@@ -28,8 +28,8 @@ pub fn show_error_box(title: &str, text: &str) {
 
 #[cfg(windows)]
 pub fn ask_yes_no(title: &str, text: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{IDYES, MB_ICONQUESTION, MB_YESNO, MessageBoxW};
     use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_YESNO};
     unsafe {
         MessageBoxW(
             None,

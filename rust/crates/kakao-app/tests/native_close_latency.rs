@@ -1,17 +1,17 @@
 #![cfg(windows)]
 //! Only test-owned, off-screen windows are mutated. No KakaoTalk is required.
 use kakao_app::config::AppSettings;
-use kakao_app::engine::{apply_evaluation, EngineCaches, SharedFlags};
+use kakao_app::engine::{EngineCaches, SharedFlags, apply_evaluation};
 use kakao_core::Evaluation;
 use kakao_win32::{RealWin32, Win32Api};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
-use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::w;
 
 static CLOSE_VISIBILITY: AtomicU32 = AtomicU32::new(0);
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {

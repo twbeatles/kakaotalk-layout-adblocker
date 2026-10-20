@@ -56,7 +56,7 @@ pub fn wait_for_process_exit(pid: u32, timeout: Duration) -> Result<(), HelperEr
     {
         use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0, WAIT_TIMEOUT};
         use windows::Win32::System::Threading::{
-            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
         };
 
         let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) };

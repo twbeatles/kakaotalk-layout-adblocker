@@ -123,10 +123,11 @@ pub fn planned_view_resize(
     if width < 1 || height < 1 {
         return None;
     }
-    if let Some(current) = current {
-        if current.width() == width && current.height() == height {
-            return None;
-        }
+    if let Some(current) = current
+        && current.width() == width
+        && current.height() == height
+    {
+        return None;
     }
     Some((0, 0, width, height))
 }

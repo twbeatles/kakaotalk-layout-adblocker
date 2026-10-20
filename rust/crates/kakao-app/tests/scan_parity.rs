@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use kakao_app::config::AppSettings;
-use kakao_app::engine::{tick, EngineCaches, SharedFlags};
+use kakao_app::engine::{EngineCaches, SharedFlags, tick};
 use kakao_app::graph_build::build_graph;
-use kakao_core::{evaluate_graph, GoldenFile, LayoutRules};
+use kakao_core::{GoldenFile, LayoutRules, evaluate_graph};
 use kakao_win32::{FakeWin32, Win32Api};
 
 fn repo_root() -> PathBuf {

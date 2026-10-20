@@ -3,22 +3,22 @@ use std::mem::size_of;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-    NOTIFYICONDATAW,
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, KillTimer, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SetTimer, SetWindowLongPtrW, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
-    GWLP_USERDATA, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_COMMAND, WM_CONTEXTMENU,
-    WM_DESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, KillTimer, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, RegisterWindowMessageW, SetTimer, SetWindowLongPtrW, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_RBUTTONUP,
+    WM_TIMER, WNDCLASSW,
 };
+use windows::core::w;
 
-use super::command::{TrayCommand, ID_EXIT};
+use super::command::{ID_EXIT, TrayCommand};
 use super::menu::{load_app_icon, show_menu, write_tip};
 use super::shell_ready::{
     continue_message_loop_without_icon, notify_icon_retry_delays, shell_tray_present,
@@ -94,7 +94,7 @@ where
         let _ = wait_for_shell_ready(SHELL_WAIT_TIMEOUT, SHELL_WAIT_POLL);
     }
 
-    let instance = GetModuleHandleW(None).map_err(|err| err.to_string())?;
+    let instance = unsafe { GetModuleHandleW(None) }.map_err(|err| err.to_string())?;
     let icon = load_app_icon(instance.into())?;
     let class = w!("KakaoTalkLayoutAdBlockerTray");
     let wc = WNDCLASSW {
@@ -105,23 +105,25 @@ where
         lpszClassName: class,
         ..Default::default()
     };
-    let _ = RegisterClassW(&wc);
+    let _ = unsafe { RegisterClassW(&wc) };
     // Note: HWND_MESSAGE creates a message-only window which Shell_NotifyIconW rejects with 0x80004005 (E_FAIL).
     // Shell_NotifyIconW requires a standard top-level window (parent: None) to receive shell callbacks.
-    let hwnd = CreateWindowExW(
-        WINDOW_EX_STYLE::default(),
-        class,
-        w!("KakaoTalk Layout AdBlocker"),
-        WINDOW_STYLE::default(),
-        0,
-        0,
-        0,
-        0,
-        None,
-        None,
-        Some(instance.into()),
-        None,
-    )
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            class,
+            w!("KakaoTalk Layout AdBlocker"),
+            WINDOW_STYLE::default(),
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+    }
     .map_err(|err| err.to_string())?;
     let mut nid = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
@@ -140,7 +142,7 @@ where
     let mut added = try_add_notify_icon(&nid);
     if !added {
         for delay in notify_icon_retry_delays() {
-            let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+            let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &nid) };
             std::thread::sleep(*delay);
             if try_add_notify_icon(&nid) {
                 added = true;
@@ -149,8 +151,8 @@ where
         }
     }
     if !added && !continue_message_loop_without_icon() {
-        let err = windows::Win32::Foundation::GetLastError();
-        let _ = DestroyWindow(hwnd);
+        let err = unsafe { windows::Win32::Foundation::GetLastError() };
+        let _ = unsafe { DestroyWindow(hwnd) };
         return Err(format!("Shell_NotifyIconW NIM_ADD failed: {err:?}"));
     }
 
@@ -163,24 +165,26 @@ where
         icon_added: Cell::new(added),
         pending: RefCell::new(Vec::new()),
     };
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of!(host) as isize);
+    unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of!(host) as isize) };
     if !added {
-        let _ = SetTimer(Some(hwnd), TRAY_RETRY_TIMER_ID, 2000, None);
+        let _ = unsafe { SetTimer(Some(hwnd), TRAY_RETRY_TIMER_ID, 2000, None) };
     }
-    let _ = SetTimer(
-        Some(hwnd),
-        TRAY_STATUS_TIMER_ID,
-        TRAY_STATUS_INTERVAL_MS,
-        None,
-    );
+    let _ = unsafe {
+        SetTimer(
+            Some(hwnd),
+            TRAY_STATUS_TIMER_ID,
+            TRAY_STATUS_INTERVAL_MS,
+            None,
+        )
+    };
     if let Some(on_ready) = on_ready {
         on_ready();
     }
 
     let mut msg = MSG::default();
-    while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-        let _ = TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+    while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+        let _ = unsafe { TranslateMessage(&msg) };
+        unsafe { DispatchMessageW(&msg) };
         // Commands are queued by wnd_proc and run here, with no borrow of
         // TrayHost held. A modal dialog inside on_command may pump messages
         // and re-enter wnd_proc; that is now safe.
@@ -191,7 +195,7 @@ where
     }
 
     TRAY_HWND.store(0, Ordering::SeqCst);
-    let _ = Shell_NotifyIconW(NIM_DELETE, &*host.nid.borrow());
+    let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &*host.nid.borrow()) };
     Ok(())
 }
 
@@ -222,7 +226,7 @@ unsafe extern "system" fn wnd_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let host = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const TrayHost;
+    let host = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const TrayHost;
     if host.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     }

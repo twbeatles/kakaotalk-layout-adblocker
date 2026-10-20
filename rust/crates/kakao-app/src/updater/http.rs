@@ -5,8 +5,8 @@ use sha2::{Digest, Sha256};
 use super::error::UpdateError;
 use super::manifest::parse_and_verify_manifest;
 use super::model::{
-    UpdateManifest, HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_TOTAL_TIMEOUT, MANIFEST_URL,
-    USER_AGENT,
+    HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, HTTP_TOTAL_TIMEOUT, MANIFEST_URL, USER_AGENT,
+    UpdateManifest,
 };
 use crate::config::VERSION;
 

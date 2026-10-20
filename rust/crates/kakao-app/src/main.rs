@@ -1,7 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use clap::Parser;
-use kakao_app::{run_with_args, should_attach_parent_console, Args};
+use kakao_app::{Args, run_with_args, should_attach_parent_console};
 
 fn main() {
     #[cfg(windows)]

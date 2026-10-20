@@ -2,14 +2,14 @@
 
 ## Unreleased
 
-의존성 패치 업그레이드. 광고 판정 규칙·알고리즘은 바꾸지 않았다.
+Rust Edition 2024 마이그레이션 + 의존성 패치 업그레이드. 광고 판정 규칙·알고리즘은 바꾸지 않았다.
 
 ### 변경
-- **Rust 패치 업그레이드**: `libc 0.2.190→0.2.191`, `rustls 0.23.45→0.23.46`, `ureq-proto 0.6.4→0.6.5`. 직접 의존성 14종·CI 액션(`@v7`)·Python `cryptography`(50.0.2)는 이미 최신이라 변경 없음. `rust/Cargo.lock`만 갱신.
-- **에디션 2024 보류**: 시험 결과 고정 계약 엔진(`kakao-core`) 수정 4건과 48개 파일 재포맷이 요구되어 의존성 업그레이드 범위 밖으로 판단하고 되돌림.
+- **Rust 패치 업그레이드**: `libc 0.2.190→0.2.191`, `rustls 0.23.45→0.23.46`, `ureq-proto 0.6.4→0.6.5`, `cc 1.8.0→1.9.0`, `find-msvc-tools 0.1.14→0.1.15`, `webpki-roots 1.0.9→1.0.10`. 직접 의존성 14종(메이저 포함 최신 확인)·CI 액션(`@v7`)·Python `cryptography`(50.0.2)는 변경 없음. `rust/Cargo.lock`만 갱신.
+- **Edition 2024 마이그레이션 완료**: 워크스페이스 `edition = "2024"` + `rust-version = "1.88"` 선언(4개 크레이트 상속, let-chain 사용 하한). `unsafe_op_in_unsafe_fn` 대응으로 Win32 호출 19곳을 내부 `unsafe {}` 블록으로 감싸고, edition 2024부터 unsafe가 된 `std::env::remove_var`/`set_var`에 SAFETY 주석 추가. clippy `collapsible_if` 17곳을 let-chain 병합으로 정리(동작 불변). rustfmt 2024 스타일 50여 파일 적용.
 
 ### 검증
-- `cargo test --workspace` 전체 통과, `clippy -D warnings`·`fmt --check` 통과.
+- `cargo test --workspace` 170 passed / 0 failed / 2 ignored, `clippy -D warnings`·`fmt --check` 통과.
 - `cargo audit` 0 취약점(168 크레이트), `cargo machete` 미사용 의존성 없음.
 - 릴리스 빌드(`kakao-app`·`kakao-updater`) 성공.
 

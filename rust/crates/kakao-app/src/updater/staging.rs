@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::error::UpdateError;
 use super::http::download_and_verify;
-use super::model::{StagedUpdate, UpdateManifest, STAGING_SEQ, UPDATE_IN_PROGRESS};
+use super::model::{STAGING_SEQ, StagedUpdate, UPDATE_IN_PROGRESS, UpdateManifest};
 
 pub fn try_begin_update() -> bool {
     UPDATE_IN_PROGRESS
@@ -164,11 +164,12 @@ mod tests {
         let left = unique_staging_path("KakaoTalkLayoutAdBlocker_v11_update", "11.1.2");
         let right = unique_staging_path("KakaoTalkLayoutAdBlocker_v11_update", "11.1.2");
         assert_ne!(left, right);
-        assert!(left
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .contains("11.1.2"));
+        assert!(
+            left.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("11.1.2")
+        );
     }
 
     #[test]

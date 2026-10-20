@@ -118,10 +118,9 @@ pub(super) fn apply_once(
                     &close_decision,
                     ticks,
                     track_close,
-                ) {
-                    if close_confirmed {
-                        log.send_close(child);
-                    }
+                ) && close_confirmed
+                {
+                    log.send_close(child);
                 }
             }
 
@@ -143,13 +142,11 @@ pub(super) fn apply_once(
                 &aggressive_decision,
                 ticks,
                 track_aggressive,
-            ) {
-                if aggressive_confirmed
-                    && aggressive_decision.action == crate::model::ActionKind::Hide
-                {
-                    log.hide_window(child);
-                    log.hidden += 1;
-                }
+            ) && aggressive_confirmed
+                && aggressive_decision.action == crate::model::ActionKind::Hide
+            {
+                log.hide_window(child);
+                log.hidden += 1;
             }
         }
     }
@@ -172,11 +169,11 @@ pub(super) fn apply_once(
             &legacy_decision,
             ticks,
             track_legacy,
-        ) {
-            if legacy_confirmed && legacy_decision.action == crate::model::ActionKind::Hide {
-                log.hide_window(*wnd);
-                log.hidden += 1;
-            }
+        ) && legacy_confirmed
+            && legacy_decision.action == crate::model::ActionKind::Hide
+        {
+            log.hide_window(*wnd);
+            log.hidden += 1;
         }
     }
 

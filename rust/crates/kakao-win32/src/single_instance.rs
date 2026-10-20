@@ -1,8 +1,8 @@
 #![cfg(windows)]
 
-use windows::core::w;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WIN32_ERROR};
 use windows::Win32::System::Threading::CreateMutexW;
+use windows::core::w;
 
 const MUTEX_NAME: windows::core::PCWSTR = w!("Local\\KakaoTalkLayoutAdBlocker_v11");
 const ERROR_ALREADY_EXISTS: u32 = 183;

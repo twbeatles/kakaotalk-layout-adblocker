@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use kakao_core::{
-    evaluate_graph_for_apply, evaluate_graph_with_states, GoldenFile, LayoutRules, WindowGraph,
+    GoldenFile, LayoutRules, WindowGraph, evaluate_graph_for_apply, evaluate_graph_with_states,
 };
 
 fn repo_root() -> PathBuf {

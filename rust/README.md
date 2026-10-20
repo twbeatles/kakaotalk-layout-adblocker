@@ -10,6 +10,7 @@ Legacy Python v11 reference is local-only (`legacy/`, not tracked); golden fixtu
 - `kakao-win32` + tray
 - `kakao-app` (`kakao-adblock-rs`): `--shadow`, `--apply`, dump, self-check, tray UI
 - Release EXE: `../dist/KakaoTalkLayoutAdBlocker_v11.exe` via `../scripts/build_release.ps1 -NoSign`
+- Edition 2024 · MSRV 1.88 (stable toolchain)
 
 ## Docs
 

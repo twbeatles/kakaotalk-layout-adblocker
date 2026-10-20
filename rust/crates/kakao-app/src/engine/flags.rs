@@ -130,10 +130,10 @@ impl SharedFlags {
 
     /// Clear `last_error` only if it still describes a restore failure.
     pub fn clear_restore_error(&self) {
-        if self.restore_error_active.swap(false, Ordering::SeqCst) {
-            if let Ok(mut guard) = self.last_error.lock() {
-                guard.clear();
-            }
+        if self.restore_error_active.swap(false, Ordering::SeqCst)
+            && let Ok(mut guard) = self.last_error.lock()
+        {
+            guard.clear();
         }
     }
 
@@ -148,10 +148,10 @@ impl SharedFlags {
     }
 
     pub(super) fn clear_error_if(&self, expected: &str) {
-        if let Ok(mut guard) = self.last_error.lock() {
-            if guard.as_str() == expected {
-                guard.clear();
-            }
+        if let Ok(mut guard) = self.last_error.lock()
+            && guard.as_str() == expected
+        {
+            guard.clear();
         }
     }
 
