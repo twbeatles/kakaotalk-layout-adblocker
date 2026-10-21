@@ -3,7 +3,7 @@
 > **관리자 권한(UAC)·시스템 변조·hosts 수정 없이, 순수 Win32 레이아웃 제어로 동작하는 초경량 카카오톡 광고 차단기**
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.11-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.12-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
 [![Idle CPU](https://img.shields.io/badge/Idle%20CPU-~0.16%25%20of%201%20core-brightgreen)](BENCHMARK.md)
@@ -163,7 +163,7 @@ flowchart TD
 
 ### 7. 🔐 Ed25519 전자 서명 기반 안전 자동 업데이트
 - 최신 릴리스 확인 시 공개키 기반 **Ed25519 전자 서명**과 **SHA-256 해시**를 이중으로 검증하여 변조된 바이너리의 실행을 원천 차단합니다.
-- 전용 업데이트 헬퍼(`kakao-updater.exe`)가 기존 프로세스를 정상 종료하고, 새 바이너리로 교체한 뒤 자동 재시작을 수행하며, 교체/실행 실패 시 롤백합니다. 새 헬퍼는 새 앱의 트레이 루프·워커 준비 응답(60초)과 250ms 생존을 확인한 뒤 백업을 정리합니다. 구 헬퍼에는 이 확인이 없으므로 새 EXE 두 개를 함께 배치해야 합니다.
+- 전용 업데이트 헬퍼(`kakao-updater.exe`)가 기존 프로세스를 정상 종료하고, 새 바이너리로 교체한 뒤 자동 재시작을 수행하며, 교체/실행 실패 시 롤백합니다. 새 헬퍼는 새 앱의 트레이 루프·워커 준비 응답(60초)과 250ms 생존을 확인한 뒤 백업을 정리합니다. 구 헬퍼에는 이 확인이 없으므로 새 EXE 두 개를 함께 배치해야 합니다. 교체는 설치본→백업, 새 파일→설치본 순서의 이동(rename)으로 수행되며 이전 시도가 남긴 백업은 덮어씁니다. 두 이동 사이 중단으로 백업만 남았으면 다음 실행이 백업을 먼저 복원합니다.
 
 ---
 

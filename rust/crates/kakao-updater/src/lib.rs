@@ -104,12 +104,16 @@ pub fn should_relaunch_previous(err: &HelperError) -> bool {
 }
 
 /// Start `current` (the previous version after a failed or rolled-back
-/// update). Returns whether the process was spawned.
+/// update). Returns whether the process was spawned. The child inherits a
+/// sanitized environment so handshake/bootloader markers cannot leak.
 pub fn relaunch_previous(current: &Path, args: &[String]) -> bool {
     if !current.is_file() {
         return false;
     }
-    match Command::new(current).args(args).spawn() {
+    let mut cmd = Command::new(current);
+    cmd.args(args);
+    sanitize_command_env(&mut cmd);
+    match cmd.spawn() {
         Ok(_) => {
             info!(current = %current.display(), "relaunched the previous version after a failed update");
             true
@@ -119,6 +123,81 @@ pub fn relaunch_previous(current: &Path, args: &[String]) -> bool {
             false
         }
     }
+}
+
+/// Canonical backup next to the installed executable (`app.exe` →
+/// `app.exe.old`). A single fixed name keeps recovery predictable; a stale
+/// file from a previous attempt is overwritten before the swap.
+pub fn backup_path_for(current: &Path) -> PathBuf {
+    current.with_extension("exe.old")
+}
+
+/// Whether a child-process environment variable must be stripped before
+/// spawning helper / relaunched / smoke-probe processes.
+///
+/// `KAKAO_UPDATE_READY_FILE` is owned by one helper→app handshake; leaking it
+/// lets an unrelated child acknowledge the wrong launch. `_MEIPASS` / `_PYI_*`
+/// / `_MEI_*` are PyInstaller onefile bootloader markers; a frozen child that
+/// inherits them resolves bundled resources against the parent's temp dir.
+pub fn should_strip_env_var(name: &str) -> bool {
+    name == "KAKAO_UPDATE_READY_FILE"
+        || name == "_MEIPASS"
+        || name.starts_with("_PYI_")
+        || name.starts_with("_MEI_")
+}
+
+/// Known bootloader/handshake keys that may have been set directly on `cmd`
+/// (where wildcard enumeration is impossible). Parent-inherited `_PYI_*` /
+/// `_MEI_*` keys are additionally removed via process-env enumeration above.
+const KNOWN_STRIP_KEYS: &[&str] = &[
+    "KAKAO_UPDATE_READY_FILE",
+    "_MEIPASS",
+    "_MEIPASS2",
+    "_PYI_APPLICATION_HOME_DIR",
+    "_PYI_ARCHIVE_FILE",
+    "_PYI_PARENT_PROCESS_LEVEL",
+    "_MEI_TMPDIR",
+];
+
+/// Remove handshake/bootloader markers from a child command's environment.
+/// Call before adding the child's own `KAKAO_UPDATE_READY_FILE` (if any).
+pub fn sanitize_command_env(cmd: &mut Command) {
+    let polluted: Vec<String> = std::env::vars_os()
+        .filter_map(|(k, _)| k.into_string().ok())
+        .filter(|k| should_strip_env_var(k))
+        .collect();
+    for key in polluted {
+        cmd.env_remove(&key);
+    }
+    // Explicitly cover markers that may have been set directly on `cmd`
+    // (or absent from this process's own environment).
+    for key in KNOWN_STRIP_KEYS {
+        cmd.env_remove(key);
+    }
+}
+
+/// A previous run may have renamed the installed exe to the backup and then
+/// crashed before moving the replacement into place. In that state `current`
+/// is missing while the backup still holds the previous version: restore it
+/// so the next attempt starts from an installed executable again.
+/// Returns `true` when a restore was performed.
+pub fn recover_interrupted_swap(current: &Path) -> Result<bool, HelperError> {
+    let backup = backup_path_for(current);
+    if current.exists() || !backup.exists() {
+        return Ok(false);
+    }
+    std::fs::rename(&backup, current).map_err(|err| {
+        HelperError::RollbackFailed(format!(
+            "interrupted update recovery failed ({} -> {}): {err}",
+            backup.display(),
+            current.display()
+        ))
+    })?;
+    info!(
+        current = %current.display(),
+        "recovered interrupted update from backup"
+    );
+    Ok(true)
 }
 
 /// Remove a staged replacement that will not be installed.
@@ -165,6 +244,11 @@ pub fn update_executable_with(
     // 1. Wait for target process termination
     wait_for_process_exit(pid, timeout)?;
 
+    // 1b. A crash between the two renames leaves `current` missing with the
+    // previous version in the backup. Restore it so this run swaps from an
+    // installed executable instead of failing with `CurrentMissing`.
+    recover_interrupted_swap(current)?;
+
     // 2. Validate paths
     if !current.exists() {
         return Err(HelperError::CurrentMissing(current.to_path_buf()));
@@ -190,10 +274,19 @@ pub fn update_executable_with(
         info!("staged update re-verified before replacement");
     }
 
-    // 3. Prepare backup path
-    let backup = current.with_extension("exe.old");
-    if backup.exists() {
-        let _ = std::fs::remove_file(&backup);
+    // 3. Prepare backup path: overwrite a stale backup from a previous
+    // attempt so the next run never fails with "backup already exists".
+    // Removal failure is logged; the rename below then reports `BackupFailed`
+    // with the installed exe still in place.
+    let backup = backup_path_for(current);
+    if backup.exists()
+        && let Err(err) = std::fs::remove_file(&backup)
+    {
+        warn!(
+            backup = %backup.display(),
+            %err,
+            "stale update backup could not be removed before swap"
+        );
     }
 
     // 4. Rename current -> current.exe.old
@@ -269,6 +362,7 @@ fn launch_verified(cmd: &mut Command, timeout: Option<Duration>) -> Result<(), S
     std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("ready");
     let result = (|| {
+        sanitize_command_env(cmd);
         let mut child = cmd
             .env("KAKAO_UPDATE_READY_FILE", &path)
             .spawn()

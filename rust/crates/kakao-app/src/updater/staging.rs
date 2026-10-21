@@ -98,9 +98,41 @@ pub fn prepare_update(manifest: &UpdateManifest) -> Result<StagedUpdate, UpdateE
     })
 }
 
+/// Child-process markers that must not leak into the helper. `KAKAO_UPDATE_READY_FILE`
+/// belongs to one helper→app handshake; PyInstaller onefile markers would make a
+/// frozen child resolve resources against the parent's temp dir.
+pub fn should_strip_child_env_var(name: &str) -> bool {
+    name == "KAKAO_UPDATE_READY_FILE"
+        || name == "_MEIPASS"
+        || name.starts_with("_PYI_")
+        || name.starts_with("_MEI_")
+}
+
+fn sanitize_child_command(cmd: &mut std::process::Command) {
+    let polluted: Vec<String> = std::env::vars_os()
+        .filter_map(|(k, _)| k.into_string().ok())
+        .filter(|k| should_strip_child_env_var(k))
+        .collect();
+    for key in polluted {
+        cmd.env_remove(&key);
+    }
+    for key in [
+        "KAKAO_UPDATE_READY_FILE",
+        "_MEIPASS",
+        "_MEIPASS2",
+        "_PYI_APPLICATION_HOME_DIR",
+        "_PYI_ARCHIVE_FILE",
+        "_PYI_PARENT_PROCESS_LEVEL",
+        "_MEI_TMPDIR",
+    ] {
+        cmd.env_remove(key);
+    }
+}
+
 pub fn launch_helper(staged: &StagedUpdate) -> Result<(), UpdateError> {
     let pid = std::process::id();
     let mut cmd = std::process::Command::new(&staged.helper);
+    sanitize_child_command(&mut cmd);
     cmd.arg("--pid")
         .arg(pid.to_string())
         .arg("--current")
@@ -196,5 +228,15 @@ mod tests {
         end_update();
         assert!(try_begin_update());
         end_update();
+    }
+
+    #[test]
+    fn helper_child_env_strips_handshake_and_bootloader_markers() {
+        assert!(should_strip_child_env_var("KAKAO_UPDATE_READY_FILE"));
+        assert!(should_strip_child_env_var("_MEIPASS"));
+        assert!(should_strip_child_env_var("_PYI_ARCHIVE_FILE"));
+        assert!(should_strip_child_env_var("_MEI_TMPDIR"));
+        assert!(!should_strip_child_env_var("PATH"));
+        assert!(!should_strip_child_env_var("KAKAO_SANITIZE_PROBE_ACTIVE"));
     }
 }

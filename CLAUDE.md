@@ -3,7 +3,7 @@
 ## 개요
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
-- 버전: `11.1.11` (에디션 2024 마이그레이션 및 검증 범위는 CHANGELOG 참고)
+- 버전: `11.1.12` (에디션 2024 마이그레이션 및 검증 범위는 CHANGELOG 참고)
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
@@ -53,7 +53,7 @@
 - `build_graph`는 top-level마다 `enum_descendant_windows` 1회 + 자손당 `GetParent` 1회로 트리를 만든다. 이전 per-node 알고리즘과의 동일성은 `kakao-app/tests/graph_build_parity.rs`가 고정한다(실데스크톱 비교는 `--ignored`).
 - 워커 tick은 `evaluate_graph_for_apply`(진단 `candidates` 미생성)를 쓰고, `--dump-tree`/`--dump-tree-series`/`--shadow`만 `evaluate_graph_with_states`를 쓴다. 두 경로의 `actions`/`state`는 동일해야 하며 `kakao-core/tests/apply_path_parity.rs`가 이를 고정한다.
 - `poll_interval_ms`는 활성(최근 2초 내 카카오톡 이벤트) 재확인 주기, `idle_poll_interval_ms`는 유휴 재확인 주기, `cache_cleanup_interval_ms`는 `states`/`stale` 캐시 정리 주기로 실제 사용된다. `idle_backoff_max_ms`(기본 1000)가 `idle_poll_interval_ms`보다 크면, 이벤트 없는 상태가 10초 지속된 뒤 10초마다 유휴 주기를 2배로 늘려 이 값까지 키운다. 이벤트가 오면 즉시 복귀하고, 훅이 없는 폴링 모드에서는 백오프하지 않는다. Python 계약의 "idle→active 약 200ms"는 이벤트 수신 경로 기준으로 유지되고, 훅 누락 시 복구 지연은 최대 `idle_backoff_max_ms`다. `start_minimized`는 트레이 전용 런타임에서 미사용이며 호환용으로만 파싱한다.
-- 새 헬퍼는 SHA-256을 받은 업데이트에서 KAKAO_UPDATE_READY_FILE로 60초 readiness와 250ms 생존을 확인한 뒤 백업을 정리한다. 앱은 env를 소비하고 트레이 루프·워커 준비 후 자기 PID로 응답한다. 실패는 child 회수 후 rollback. 구 헬퍼에는 protocol이 없어 EXE 두 개를 함께 배치한다.
+- 새 헬퍼는 SHA-256을 받은 업데이트에서 KAKAO_UPDATE_READY_FILE로 60초 readiness와 250ms 생존을 확인한 뒤 백업을 정리한다. 앱은 env를 소비하고 트레이 루프·워커 준비 후 자기 PID로 응답한다. 실패는 child 회수 후 rollback. 교체는 rename-rename(설치본→백업, 새 파일→설치본)이며 낡은 `*.exe.old`는 교체 전 삭제한다. 두 이동 사이 중단으로 설치본이 없고 백업만 남으면 다음 실행이 백업을 먼저 복원한다. 헬퍼·재실행·readiness 자식은 `KAKAO_UPDATE_READY_FILE`·`_MEIPASS`·`_PYI_*`·`_MEI_*`를 제거한 환경으로 띄운다. 구 헬퍼에는 protocol이 없어 EXE 두 개를 함께 배치한다.
 - DEBUG kakao_latency는 PID·event age·graph/evaluate/apply/first hide 시간을 기록한다(사용자 텍스트 없음). series는 elapsed_ms/capture_us를 포함한다. docs/testing/LATENCY_VALIDATION.md 참고.
 - 성능 측정용 읽기 전용 프로브: `cargo test --release -p kakao-app --test perf_probe -- --ignored --nocapture`.
 - `--self-check`는 APPDATA 쓰기, `HKCU Run` 읽기/쓰기 접근, Run 등록 명령 health, 프로세스 열거를 점검한다. 경고는 `core_warnings`(strict에서 실패)와 `info_warnings`(설정 자동 복구 등, strict에서도 통과)로 분리한다.
