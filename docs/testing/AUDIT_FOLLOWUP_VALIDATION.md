@@ -2,7 +2,7 @@
 
 최종 자동 검증: **2026-10-23 (Asia/Seoul)**.
 
-대상은 `9e33a55` 이후 main에 반영할 후속 안정성 수정이다. 릴리스 버전은 `11.1.13`이며, 앱·워크스페이스·Windows 파일 버전 동기화를 수행했다. 자동 검증은 아래 결과를 참조하고, 전용 VM 실기 항목은 아직 미실행이다.
+대상은 `9e33a55` 이후 main에 반영한 후속 안정성 수정과 보안 패치다. 현재 릴리스 버전은 `11.1.14`이며, 앱·워크스페이스·Windows 파일 버전 동기화를 수행했다. 전용 VM 실기 항목은 아직 미실행이다.
 
 ## 구현 및 감사 항목 대응
 
@@ -18,13 +18,13 @@
 | 파일 복구·경합 | Windows named ConfigMutex, unique backup create_new/sync, backup 실패 시 heal/토글 저장 거절, bootstrap create_new. | thread 및 별도 두 프로세스 read-modify-write, backup 실패 경계, 기존 bootstrap 파일 보존 |
 | HTTP | 최대 3회 요청, 200/500ms backoff, 요청당 기존 90초 timeout. 일시 transport/408/429/일부5xx만 재시도. signature/hash 검증은 retry 밖. | injected 503→503→성공, 404 즉시 실패, 429 3회 제한. 라이브 GitHub 장애 실험은 하지 않음 |
 | 구조 | 파일 교체를 transaction 모듈로 분리. shell add와 timer 간 경계, retry 및 startup 저장 경계를 테스트 가능하게 구성. | 기존 classifier/golden 회귀 유지. 일반 리팩터링이나 광고 휴리스틱 변경 없음 |
-| 문서·CI | strict/core/info·복원 한도·업데이트 교체·트레이 설명 정정. windows-ci가 build_release.ps1 -NoSign 호출. | `v11.1.13` release workflow 성공. Windows CI 실행 상태는 아래 배포 기록에 별도 기재 |
+| 문서·CI | strict/core/info·복원 한도·업데이트 교체·트레이 설명 정정. windows-ci가 build_release.ps1 -NoSign 호출. | `v11.1.13` release workflow 성공. Windows CI는 새 `RUSTSEC-2026-0382` 권고로 실패했고, v11.1.14에서 `rustls-webpki`를 수정 버전으로 갱신 |
 
 ## 자동 검증
 
 현재 테스트/빌드의 최종 수치와 smoke 결과는 이 문서의 마지막 검증 결과 절에 기록한다.
 
-환경: Windows, `rustc 1.99.1`, `x86_64-pc-windows-msvc`. 의존성 버전은 바꾸지 않았다. `11.1.13` 앱 버전에 맞춰 Cargo.lock의 workspace package metadata도 갱신했다. MSRV 1.88 실행 검증은 별도로 하지 않았다.
+환경: Windows, `rustc 1.99.1`, `x86_64-pc-windows-msvc`. `v11.1.13` 검증 당시 앱 의존성은 바꾸지 않았고, 후속 `v11.1.14`에서 권고된 `rustls-webpki 0.103.16`만 갱신했다. Cargo.lock의 workspace package metadata도 해당 앱 버전에 맞췄다. MSRV 1.88 실행 검증은 별도로 하지 않았다.
 
 실행 명령:
 
@@ -40,11 +40,11 @@ cargo build --release --locked -p kakao-app -p kakao-updater
 
 `transaction_recovery` child 중단 시험은 부모 테스트가 만든 임시 파일에서 `process::exit`로 Drop을 건너뛴다. 실제 설치본·작업 중인 앱·카카오톡을 종료시키지 않는다. native timer/좌표 시험도 자체 생성한 숨겨진/화면 밖 테스트 창만 대상으로 한다.
 
-## 11.1.13 릴리스 빌드 확인
+## 11.1.14 릴리스 빌드 확인
 
-`scripts/build_release.ps1 -NoSign -DistDir dist_release_11_1_13`가 앱·helper·ZIP을 빌드하고 packaged strict self-check를 통과했다. 검증 산출물은 무시 대상인 `build/release_11_1_13`에 보관했다. 스크립트의 대화형 startup smoke는 추적 파일을 만들지 못해 실패했으며, CI와 같은 `CI=true` 환경에서 재실행해 smoke는 의도대로 skip되고 패키징은 통과했다. 기존 `dist/` 앱 파일은 다른 프로세스가 열고 있어 덮어쓰지 않았다. 로컬 빌드는 코드 서명을 생략했다.
+`scripts/build_release.ps1 -NoSign -DistDir build/release_11_1_14`가 앱·helper·ZIP을 빌드하고 packaged strict self-check를 통과했다. CI와 같은 `CI=true` 환경이라 대화형 startup smoke는 skip됐다. 기존 `dist/` 앱 파일은 다른 프로세스가 열고 있어 덮어쓰지 않았다. 로컬 빌드는 코드 서명을 생략했다. `rustls-webpki`는 `0.103.16`으로, 나머지 의존성 버전은 그대로 유지했다.
 
-GitHub `release` workflow run `39872680811`은 workspace 테스트, 릴리스 빌드, 서명 매니페스트 생성, 업로드 및 공개 매니페스트 검증까지 모두 성공했다. 공개 태그는 `v11.1.13`이며 앱 EXE, `kakao-updater.exe`, ZIP, `update.json`이 게시됐다. Windows CI run `39872671703`은 확인 시점에 진행 중이었다.
+GitHub `release` workflow run `39872680811`은 workspace 테스트, v11.1.13 빌드, 서명 매니페스트 생성, 업로드 및 공개 매니페스트 검증까지 모두 성공했다. 이후 Windows CI run `39872671703`의 Audit 단계가 `RUSTSEC-2026-0382`로 실패했고, 수정 버전은 `0.103.16`이다. v11.1.14의 release/Windows CI 실행 결과는 새 푸시 후 확인한다.
 
 ## 전용 VM 수동 절차 — 모두 NOT RUN
 
