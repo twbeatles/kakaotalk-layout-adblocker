@@ -17,7 +17,7 @@
 | ISSUE-003 | child zero-size에 SWP_NOMOVE 적용. OFF/종료/stale 및 실제 중첩 Win32 child의 non-zero offset 복원 테스트 통과. core 판정/action/golden fixture 불변. |
 | 설정·오류 | 프로세스 간 설정 잠금, bootstrap create_new, 고유 파손 백업·backup 실패 시 원본 보존, 토글/역롤백/shell 실패 사용자 표시. startup 역롤백은 원래 command를 보존. |
 | 네트워크·helper | 유한한 일시 오류 retry·manifest 수신 제한. 구 helper는 종료 전 거절하고 두 EXE 동시 ZIP 설치를 안내. helper 자체 자동 다운로드는 추가하지 않음. |
-| 문서·구조·CI | transaction 모듈과 오류 주입 경계, README/CLAUDE/CHANGELOG 정정, Windows CI가 실제 build_release.ps1 -NoSign/strict smoke를 호출하도록 변경. `v11.1.13` 릴리스 성공 후 Windows CI가 새 RustSec 권고를 발견해 `rustls-webpki 0.103.16`을 반영한 `11.1.14` 보안 후속 버전을 준비했다. |
+| 문서·구조·CI | transaction 모듈과 오류 주입 경계, README/CLAUDE/CHANGELOG 정정, Windows CI가 실제 build_release.ps1 -NoSign/strict smoke를 호출하도록 변경. `v11.1.13` CI가 발견한 RustSec 권고를 `rustls-webpki 0.103.16`으로 해결하고, `v11.1.14` 릴리스와 Windows CI가 모두 통과했다. |
 
 최종 자동 검증: **Cargo suite 196 passed / 0 failed / 2 ignored**, fmt/clippy 통과, 앱·helper 릴리스 빌드 통과, 격리 APPDATA의 packaged strict self-check `exit 0 / core ok / warnings []`, 릴리스 helper protocol/복구 검사 통과. 자식 프로세스가 중복 출력한 테스트 요약은 Cargo suite 집계에서 제외했다.
 
