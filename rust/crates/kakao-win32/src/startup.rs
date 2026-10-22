@@ -135,21 +135,23 @@ pub fn set_run_command(command: &str) -> bool {
     if status != ERROR_SUCCESS {
         return false;
     }
-    let _ = set_startup_approved_enabled();
-    true
+    set_startup_approved_enabled()
 }
 
 pub fn delete_run_command() -> bool {
     let mut key = HKEY::default();
     let status =
         unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, Some(0), KEY_SET_VALUE, &mut key) };
+    if status == ERROR_FILE_NOT_FOUND {
+        return delete_startup_approved();
+    }
     if status != ERROR_SUCCESS {
         return false;
     }
     let status = unsafe { RegDeleteValueW(key, VALUE_NAME) };
     let _ = unsafe { RegCloseKey(key) };
-    let _ = delete_startup_approved();
-    status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND
+    let approved = delete_startup_approved();
+    (status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND) && approved
 }
 
 pub fn ensure_startup_approved_enabled() -> bool {

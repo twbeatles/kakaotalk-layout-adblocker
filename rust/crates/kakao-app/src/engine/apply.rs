@@ -117,8 +117,8 @@ pub fn apply_evaluation(
         if !precheck(hwnd) {
             continue;
         }
-        // View resize is size-only (Python SWP_NOMOVE). Zero-size popup
-        // fallback must still be allowed to move to 0,0.
+        // Child positions are parent-relative but snapshots hold screen rects.
+        // Keep their offset during zero-size so size-only restore is reversible.
         let width = pos[3];
         let height = pos[4];
         let is_view_resize = width > 0 && height > 0;
@@ -138,7 +138,11 @@ pub fn apply_evaluation(
             remember_snapshot(api, graph, hwnd, snapshots);
         }
         let mut swp_flags = SWP_NOZORDER | SWP_NOACTIVATE;
-        if is_view_resize {
+        if is_view_resize
+            || graph
+                .get(hwnd)
+                .is_some_and(|node| node.structural_parent.is_some())
+        {
             swp_flags |= SWP_NOMOVE;
         }
         let applied = api.set_window_pos(

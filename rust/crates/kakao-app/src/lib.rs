@@ -30,6 +30,15 @@ pub fn run_with_args(args: Args) -> i32 {
         eprintln!("This application only supports Windows.");
         return 2;
     }
+    if args.exit {
+        #[cfg(windows)]
+        return if kakao_win32::tray::request_existing_exit() {
+            0
+        } else {
+            eprintln!("실행 중인 트레이 호스트를 찾지 못했습니다.");
+            1
+        };
+    }
     if args.dump_tree_series && args.dump_series_duration_ms > 10_000 {
         eprintln!("--dump-series-duration-ms must be <= 10000");
         return 2;
@@ -271,6 +280,8 @@ pub fn run_with_args(args: Args) -> i32 {
                         }
                         Err(err) => {
                             tracing::warn!(%err, "failed to save settings, rolling back enabled toggle");
+                            flags_for_tray.set_last_error(&err.to_string());
+                            dialogs::show_error_box("설정 저장 실패", &err.to_string());
                         }
                     }
                 }
@@ -284,29 +295,32 @@ pub fn run_with_args(args: Args) -> i32 {
                         }
                         Err(err) => {
                             tracing::warn!(%err, "failed to save settings, rolling back aggressive toggle");
+                            flags_for_tray.set_last_error(&err.to_string());
+                            dialogs::show_error_box("설정 저장 실패", &err.to_string());
                         }
                     }
                 }
                 TrayCommand::ToggleStartup => {
                     let next = !flags_for_tray.startup.load(Ordering::SeqCst);
-                    if crate::startup::set_enabled(next) {
-                        match update_settings(&settings_path, &settings, |s| {
-                            s.run_on_startup = next
-                        }) {
-                            Ok(written) => {
-                                settings = written;
-                                flags_for_tray.startup.store(next, Ordering::SeqCst);
-                            }
-                            Err(err) => {
-                                tracing::warn!(%err, "failed to save settings, rolling back startup toggle");
-                                let _ = crate::startup::set_enabled(!next);
-                            }
+                    let previous = crate::startup::current_command();
+                    match crate::startup::commit_toggle(
+                        || crate::startup::set_enabled(next),
+                        || update_settings(&settings_path, &settings, |s| s.run_on_startup = next),
+                        || crate::startup::restore_command(previous.as_deref()),
+                    ) {
+                        Ok(written) => {
+                            settings = written;
+                            flags_for_tray.startup.store(next, Ordering::SeqCst);
                         }
-                    } else {
-                        dialogs::show_error_box(
-                            "시작프로그램",
-                            "시작프로그램 등록 변경에 실패했습니다. 레지스트리 접근이 차단되어 있는지 확인해 주세요.",
-                        );
+                        Err(err) => {
+                            flags_for_tray.startup.store(
+                                crate::startup::current_command().is_some(),
+                                Ordering::SeqCst,
+                            );
+                            flags_for_tray.set_last_error(&err);
+                            tracing::warn!(%err, "startup transaction failed");
+                            dialogs::show_error_box("시작프로그램", &err);
+                        }
                     }
                 }
                 TrayCommand::ResetRestoreFailures => {
@@ -314,12 +328,18 @@ pub fn run_with_args(args: Args) -> i32 {
                     flags_for_tray.notify_control();
                 }
                 TrayCommand::OpenLogs => {
-                    let _ = kakao_win32::tray::shell_open(&log_dir.to_string_lossy());
+                    if !kakao_win32::tray::shell_open(&log_dir.to_string_lossy()) {
+                        flags_for_tray.set_last_error("로그 폴더를 열지 못했습니다.");
+                        dialogs::show_error_box("로그", "로그 폴더를 열지 못했습니다.");
+                    }
                 }
                 TrayCommand::OpenReleases => {
-                    let _ = kakao_win32::tray::shell_open(
+                    if !kakao_win32::tray::shell_open(
                         "https://github.com/twbeatles/kakaotalk-layout-adblocker/releases",
-                    );
+                    ) {
+                        flags_for_tray.set_last_error("릴리스 페이지를 열지 못했습니다.");
+                        dialogs::show_error_box("릴리스", "릴리스 페이지를 열지 못했습니다.");
+                    }
                 }
                 TrayCommand::CheckUpdate => {
                     if !updater::try_begin_update() {

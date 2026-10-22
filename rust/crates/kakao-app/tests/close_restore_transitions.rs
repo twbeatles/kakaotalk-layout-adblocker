@@ -45,6 +45,60 @@ fn enabled_settings() -> AppSettings {
     }
 }
 
+#[test]
+fn nonzero_popup_child_geometry_survives_off_final_and_stale_restore() {
+    for mode in ["off", "final", "stale"] {
+        let mut dump: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/window_dumps/popup_adfit_webview.json"
+        ))
+        .unwrap();
+        dump["windows"][1]["children"][0]["rect"] = serde_json::json!([75, 85, 195, 165]);
+        let api = FakeWin32::from_dump_json(&dump.to_string()).unwrap();
+        let before = api.get_window_rect(201);
+        let settings = enabled_settings();
+        let flags = SharedFlags::from_settings(&settings, true);
+        let mut caches = EngineCaches::new();
+        tick(
+            &api,
+            &api.pids(),
+            &settings,
+            &LayoutRules::default(),
+            &mut caches,
+            &flags,
+        );
+        assert!(!api.has_visible_style(201));
+        let zero = api.get_window_rect(201).unwrap();
+        assert_eq!((zero.left, zero.top), (75, 85));
+        let result = if mode == "stale" {
+            // The same window identities survive; only the host title guard
+            // changes, so stale recovery must restore the original snapshots.
+            api.set_text(200, "ordinary viewer");
+            for _ in 0..2 {
+                tick(
+                    &api,
+                    &api.pids(),
+                    &settings,
+                    &LayoutRules::default(),
+                    &mut caches,
+                    &flags,
+                );
+            }
+            assert!(caches.snapshots.is_empty());
+            (flags.restore_failures.load(Ordering::SeqCst), String::new())
+        } else {
+            flags.enabled.store(false, Ordering::SeqCst);
+            if mode == "final" {
+                caches.drain_restore_all_final(&api)
+            } else {
+                caches.drain_restore_all(&api)
+            }
+        };
+        assert_eq!(result, (0, String::new()));
+        assert_eq!(api.get_window_rect(201), before);
+        assert!(api.has_visible_style(201));
+    }
+}
+
 struct Harness {
     api: FakeWin32,
     pids: Vec<i64>,

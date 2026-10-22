@@ -148,18 +148,31 @@ pub fn update_settings(
     fallback: &AppSettings,
     change: impl FnOnce(&mut AppSettings),
 ) -> std::io::Result<AppSettings> {
-    let (value, warnings) = load_json_value(path, "layout_settings_v11.json");
+    let _guard = super::storage::config_lock()?;
+    let (value, warnings) =
+        super::storage::load_json_value_unlocked(path, "layout_settings_v11.json");
+    if warnings
+        .iter()
+        .any(|w| w.contains("원본 보존") || w.contains("읽기 실패"))
+    {
+        return Err(std::io::Error::other(warnings.join("; ")));
+    }
     let (mut next, field_warnings) =
         merge_typed_settings(fallback.clone(), &value, "layout_settings_v11.json");
     for warning in warnings.iter().chain(&field_warnings) {
         tracing::warn!("{warning}");
     }
     change(&mut next);
-    save_settings(path, &next)?;
+    save_settings_unlocked(path, &next)?;
     Ok(next)
 }
 
 pub fn save_settings(path: &Path, settings: &AppSettings) -> std::io::Result<()> {
+    let _guard = super::storage::config_lock()?;
+    save_settings_unlocked(path, settings)
+}
+
+pub(super) fn save_settings_unlocked(path: &Path, settings: &AppSettings) -> std::io::Result<()> {
     let body = serde_json::to_string_pretty(settings).unwrap_or_else(|_| "{}".into());
     super::storage::atomic_write(path, &format!("{body}\n"))
 }

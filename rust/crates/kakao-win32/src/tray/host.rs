@@ -6,8 +6,7 @@ use std::time::Duration;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
-    Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
@@ -35,6 +34,35 @@ const SHELL_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 const SHELL_WAIT_POLL: Duration = Duration::from_millis(500);
 static TRAY_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
+fn reconcile_registration(hwnd: HWND, host: &TrayHost, added: bool) {
+    host.icon_added.set(added);
+    unsafe {
+        if !added {
+            if SetTimer(
+                Some(hwnd),
+                TRAY_RETRY_TIMER_ID,
+                host.retry_interval_ms,
+                None,
+            ) == 0
+                && let Ok(mut error) = host.status.last_error.lock()
+            {
+                *error = "트레이 복구 타이머 실패: --exit로 종료 후 다시 실행하세요.".into();
+            }
+        } else {
+            let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
+        }
+    }
+}
+
+/// Graceful control remains available when the shell has lost the icon.
+pub fn request_existing_exit() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    let Ok(hwnd) = (unsafe { FindWindowW(w!("KakaoTalkLayoutAdBlockerTray"), None) }) else {
+        return false;
+    };
+    unsafe { PostMessageW(Some(hwnd), WM_COMMAND, WPARAM(ID_EXIT as usize), LPARAM(0)) }.is_ok()
+}
+
 /// Tray window state.
 ///
 /// Every field is interior-mutable so `wnd_proc` only ever takes a shared
@@ -47,6 +75,8 @@ pub(super) struct TrayHost {
     pub(super) nid: RefCell<NOTIFYICONDATAW>,
     pub(super) taskbar_created: u32,
     pub(super) icon_added: Cell<bool>,
+    notify_add: fn(&NOTIFYICONDATAW) -> bool,
+    retry_interval_ms: u32,
     pub(super) pending: RefCell<Vec<TrayCommand>>,
 }
 
@@ -163,12 +193,12 @@ where
         nid: RefCell::new(nid),
         taskbar_created,
         icon_added: Cell::new(added),
+        notify_add: try_add_notify_icon,
+        retry_interval_ms: 2000,
         pending: RefCell::new(Vec::new()),
     };
     unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of!(host) as isize) };
-    if !added {
-        let _ = unsafe { SetTimer(Some(hwnd), TRAY_RETRY_TIMER_ID, 2000, None) };
-    }
+    reconcile_registration(hwnd, &host, added);
     let _ = unsafe {
         SetTimer(
             Some(hwnd),
@@ -266,13 +296,10 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_TIMER => {
             match wparam.0 {
-                TRAY_RETRY_TIMER_ID if !host.icon_added.get() => unsafe {
-                    let added = Shell_NotifyIconW(NIM_ADD, &*host.nid.borrow()).as_bool();
-                    host.icon_added.set(added);
-                    if added {
-                        let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
-                    }
-                },
+                TRAY_RETRY_TIMER_ID if !host.icon_added.get() => {
+                    let added = (host.notify_add)(&host.nid.borrow());
+                    reconcile_registration(hwnd, host, added);
+                }
                 TRAY_STATUS_TIMER_ID => refresh_tooltip(host),
                 _ => {}
             }
@@ -282,15 +309,98 @@ unsafe extern "system" fn wnd_proc(
             unsafe {
                 let nid = host.nid.borrow();
                 let _ = Shell_NotifyIconW(NIM_DELETE, &*nid);
-                let added = Shell_NotifyIconW(NIM_ADD, &*nid).as_bool();
+                let added = (host.notify_add)(&nid);
                 drop(nid);
-                host.icon_added.set(added);
-                if added {
-                    let _ = KillTimer(Some(hwnd), TRAY_RETRY_TIMER_ID);
-                }
+                reconcile_registration(hwnd, host, added);
             }
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use windows::Win32::UI::WindowsAndMessaging::{PM_REMOVE, PeekMessageW, SendMessageW};
+
+    static ADD_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+    fn transient_add(_: &NOTIFYICONDATAW) -> bool {
+        ADD_ATTEMPTS.fetch_add(1, Ordering::SeqCst) > 0
+    }
+
+    #[test]
+    fn taskbar_created_failure_recovers_via_real_timer_without_another_broadcast() {
+        unsafe {
+            ADD_ATTEMPTS.store(0, Ordering::SeqCst);
+            let instance = GetModuleHandleW(None).unwrap();
+            let class = w!("KakaoAuditTrayRetryTest");
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(wnd_proc),
+                hInstance: instance.into(),
+                lpszClassName: class,
+                ..Default::default()
+            };
+            assert_ne!(RegisterClassW(&wc), 0);
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class,
+                w!("audit-owned"),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )
+            .unwrap();
+            struct Cleanup(HWND);
+            impl Drop for Cleanup {
+                fn drop(&mut self) {
+                    unsafe {
+                        // Disconnect the stack pointer before destroying this test's window.
+                        SetWindowLongPtrW(self.0, GWLP_USERDATA, 0);
+                        let _ = DestroyWindow(self.0);
+                    }
+                }
+            }
+            let _cleanup = Cleanup(hwnd);
+            let host = TrayHost {
+                flags: TrayFlags {
+                    enabled: Arc::new(AtomicBool::new(true)),
+                    aggressive: Arc::new(AtomicBool::new(true)),
+                    startup: Arc::new(AtomicBool::new(false)),
+                },
+                status: TrayStatus::default(),
+                nid: RefCell::new(NOTIFYICONDATAW::default()),
+                taskbar_created: WM_APP + 100,
+                icon_added: Cell::new(true),
+                pending: RefCell::new(Vec::new()),
+                notify_add: transient_add,
+                retry_interval_ms: 10,
+            };
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, std::ptr::addr_of!(host) as isize);
+            SendMessageW(hwnd, host.taskbar_created, Some(WPARAM(0)), Some(LPARAM(0)));
+            assert!(!host.icon_added.get());
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !host.icon_added.get() && std::time::Instant::now() < deadline {
+                let mut msg = MSG::default();
+                if PeekMessageW(&mut msg, Some(hwnd), WM_TIMER, WM_TIMER, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&msg);
+                } else {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            assert!(
+                host.icon_added.get(),
+                "real retry timer must recover the injected NIM_ADD failure"
+            );
+            assert_eq!(ADD_ATTEMPTS.load(Ordering::SeqCst), 2);
+        }
     }
 }

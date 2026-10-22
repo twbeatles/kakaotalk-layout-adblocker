@@ -78,11 +78,56 @@ pub fn stage_helper(src: &Path) -> Result<PathBuf, UpdateError> {
     Ok(dest)
 }
 
+/// Reject old helpers before the app exits. A hung probe is bounded and reaped.
+pub fn verify_helper_protocol(helper: &Path) -> Result<(), UpdateError> {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(helper);
+    cmd.arg("--protocol-version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    sanitize_child_command(&mut cmd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let failed = || {
+        UpdateError::Message("업데이트 헬퍼가 호환되지 않습니다. 최신 ZIP의 앱과 kakao-updater.exe를 함께 설치하세요.".into())
+    };
+    let mut child = cmd.spawn().map_err(|_| failed())?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(failed());
+            }
+        }
+    }
+    let output = child.wait_with_output().map_err(|_| failed())?;
+    if output.status.success()
+        && String::from_utf8_lossy(&output.stdout).trim() == "kakao-updater-protocol-2"
+    {
+        Ok(())
+    } else {
+        Err(failed())
+    }
+}
+
 pub fn prepare_update(manifest: &UpdateManifest) -> Result<StagedUpdate, UpdateError> {
     let current_exe = std::env::current_exe()
         .map_err(|e| UpdateError::Message(format!("현재 실행 파일 경로 확인 실패: {e}")))?;
     let helper_src = resolve_helper(&current_exe)?;
     let helper = stage_helper(&helper_src)?;
+    if let Err(err) = verify_helper_protocol(&helper) {
+        let _ = std::fs::remove_file(&helper);
+        return Err(err);
+    }
     let replacement = unique_staging_path("KakaoTalkLayoutAdBlocker_v11_update", &manifest.version);
     if let Err(err) = download_and_verify(manifest, &replacement) {
         let _ = std::fs::remove_file(&helper);
@@ -166,7 +211,11 @@ pub fn discard_staged(staged: &StagedUpdate) {
 
 pub fn apply_update(manifest: &UpdateManifest) -> Result<(), UpdateError> {
     let staged = prepare_update(manifest)?;
-    launch_helper(&staged)
+    if let Err(err) = launch_helper(&staged) {
+        discard_staged(&staged);
+        return Err(err);
+    }
+    Ok(())
 }
 
 pub fn unix_now() -> u64 {
@@ -217,6 +266,10 @@ mod tests {
         std::fs::write(&helper, b"MZ-helper-bytes").unwrap();
         let found = resolve_helper(&fake_app).unwrap();
         assert_eq!(found, helper);
+        assert!(
+            verify_helper_protocol(&helper).is_err(),
+            "MZ header alone is not protocol compatibility"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

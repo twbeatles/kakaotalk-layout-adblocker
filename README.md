@@ -3,7 +3,7 @@
 > **관리자 권한(UAC)·시스템 변조·hosts 수정 없이, 순수 Win32 레이아웃 제어로 동작하는 초경량 카카오톡 광고 차단기**
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-0078D6?logo=windows)](https://github.com/twbeatles/kakaotalk-layout-adblocker/releases)
-[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.12-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust Version](https://img.shields.io/badge/Rust-Native%20v11.1.13-orange?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No Admin Required](https://img.shields.io/badge/UAC-Not%20Required-brightgreen)](#-안전한-순수-레이아웃-차단-layout-only)
 [![Idle CPU](https://img.shields.io/badge/Idle%20CPU-~0.16%25%20of%201%20core-brightgreen)](BENCHMARK.md)
@@ -159,11 +159,23 @@ flowchart TD
 
 ### 6. 🔒 무권한(Non-UAC) 구동 & 스마트 시작프로그램
 - 관리자 권한이 필요한 시스템 레지스트리(`HKLM`)나 시스템 폴더를 건드리지 않고, 현재 사용자 레지스트리인 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에만 등록합니다.
-- Windows 부팅 직후 작업표시줄 탐색기(`Shell_TrayWnd`)가 늦게 로딩되는 환경을 고려하여 셸이 준비될 때까지 기다린 후 트레이 아이콘을 등록(`TaskbarCreated` 메시지 감지)하므로 아이콘이 증발하지 않습니다.
+  - Windows 부팅 직후 셸 준비를 기다리고 아이콘을 재시도합니다. Explorer 재시작(`TaskbarCreated`)에서 재등록에 실패해도 2초 간격으로 재시도합니다. 아이콘이 계속 보이지 않으면 `KakaoTalkLayoutAdBlocker_v11.exe --exit`로 복원을 요청한 뒤 다시 실행하세요. 종료 요청 전달 성공은 모든 창의 복원 성공을 보장하지 않습니다.
 
 ### 7. 🔐 Ed25519 전자 서명 기반 안전 자동 업데이트
+
+업데이트 전 헬퍼의 protocol 2 호환성을 검사합니다. 구 헬퍼라면 앱을 종료하기 전에 안내하고 중단하므로, 최신 ZIP의 **앱과 `kakao-updater.exe` 두 파일을 함께 교체**하세요. 자동 업데이트는 메인 EXE만 갱신하며 헬퍼를 별도로 자동 교체하지 않습니다.
+
+이전 업데이트가 중단되어 앱을 실행할 수 없고 `.exe.old` 백업이 있다면 차단기를 종료한 뒤 같은 폴더의 `kakao-updater.exe`를 실행하세요. 기본 동작은 옆의 `KakaoTalkLayoutAdBlocker_v11.exe` 백업 복원 및 재실행입니다. 다른 이름/경로는 다음과 같이 지정합니다. 백업은 복구 후에도 보존됩니다.
+
+```powershell
+.\kakao-updater.exe --recover --current "D:\Tools\KakaoTalkLayoutAdBlocker_v11.exe"
+# 복원만 하고 실행하지 않기
+.\kakao-updater.exe --recover --current "D:\Tools\KakaoTalkLayoutAdBlocker_v11.exe" --no-relaunch
+```
+
+복원은 앱 설치본만 대상으로 하며 카카오톡 UI 스냅샷을 되살리는 기능은 아닙니다. 백업이 없으면 최신 ZIP을 다시 설치하세요. 네트워크 일시 오류(408/429/일부 5xx·연결 중단·timeout)는 200/500ms 대기 후 최대 두 번 재시도하며, 요청당 90초 timeout이 적용됩니다(최대 약 271초/다운로드). 서명·해시 오류와 일반 4xx는 자동 재시도하지 않습니다.
 - 최신 릴리스 확인 시 공개키 기반 **Ed25519 전자 서명**과 **SHA-256 해시**를 이중으로 검증하여 변조된 바이너리의 실행을 원천 차단합니다.
-- 전용 업데이트 헬퍼(`kakao-updater.exe`)가 기존 프로세스를 정상 종료하고, 새 바이너리로 교체한 뒤 자동 재시작을 수행하며, 교체/실행 실패 시 롤백합니다. 새 헬퍼는 새 앱의 트레이 루프·워커 준비 응답(60초)과 250ms 생존을 확인한 뒤 백업을 정리합니다. 구 헬퍼에는 이 확인이 없으므로 새 EXE 두 개를 함께 배치해야 합니다. 교체는 설치본→백업, 새 파일→설치본 순서의 이동(rename)으로 수행되며 이전 시도가 남긴 백업은 덮어씁니다. 두 이동 사이 중단으로 백업만 남았으면 다음 실행이 백업을 먼저 복원합니다.
+- 전용 업데이트 헬퍼(`kakao-updater.exe`)가 기존 프로세스를 정상 종료하고, 새 바이너리로 교체한 뒤 자동 재시작을 수행하며, 교체/실행 실패 시 롤백합니다. 새 헬퍼는 새 앱의 트레이 루프·워커 준비 응답(60초)과 250ms 생존을 확인한 뒤 백업을 정리합니다. 구 헬퍼에는 이 확인이 없으므로 새 EXE 두 개를 함께 배치해야 합니다. 새 EXE와 백업을 설치 폴더에 먼저 준비·sync·검증하고 rename으로 교체하며, 설치 경로를 먼저 삭제하거나 직접 복사하지 않습니다. 두 교체 경계 사이 중단이나 readiness 실패가 있으면 백업으로 복구를 시도합니다.
 
 ---
 
@@ -186,7 +198,7 @@ flowchart TD
   GitHub 릴리스 열기            ← 최신 버전 릴리스 웹페이지 열기
   업데이트 확인                 ← Ed25519 서명 검증 원클릭 자동 업데이트
   --------------------------
-  종료                         ← 모든 카카오톡 창을 원상 복구한 뒤 안전 종료
+  종료                         ← 숨김/zero-size 복원 시도 후 종료(3초 대기 한도)
 ```
 
 ### 메뉴별 기능 상세 설명
@@ -240,7 +252,8 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 | `--json` | 진단 결과를 정형화된 JSON 포맷으로 출력합니다. |
 | `--dump-tree` | 현재 카카오톡의 윈도우 계층 구조를 JSON으로 덤프 저장합니다. |
 | `--dump-tree-series` | 지정된 시간 동안 연속으로 윈도우 프레임과 광고 후보 판정 결과를 기록합니다. |
-| `--strict-self-check` | 경고성 진단 항목도 핵심 실패(종료 코드 1)로 엄격하게 검증합니다. |
+| `--strict-self-check` | APPDATA 쓰기·Run 읽기/쓰기·프로세스 열거의 core 경고를 실패로 처리합니다. 설정 자가 복구 등 info 경고는 실패시키지 않습니다. 트레이 등록 성공 여부는 이 명령의 검증 범위가 아닙니다. |
+| `--exit` | 실행 중인 인스턴스에 숨김/zero-size 복원 및 종료를 요청합니다. 아이콘이 없어도 사용할 수 있으며, 요청을 전달하지 못하면 종료 코드 1입니다. |
 | `--dump-dir <path>` | 덤프 파일이 저장될 디렉터리를 지정합니다. (기본값: `%APPDATA%\...`) |
 | `--dump-series-duration-ms <ms>` | 연속 덤프 수집 총 시간 (기본값: 1000, 최대: 10000). |
 | `--dump-series-interval-ms <ms>` | 연속 덤프 수집 간격 (기본값: 100, 최소: 10). |
@@ -310,7 +323,8 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
 ```
 
 ### 설정 파일 자동 자가 치유 (Self-Healing)
-- 설정 파일에 JSON 문법 오류가 발생하면 자동으로 `*.broken-<unix-epoch>` 이름으로 백업하고 기본값으로 자가 치유합니다.
+- 설정 파일에 JSON 문법 오류가 발생하면 `*.broken-<pid>-<sequence>-<unix-epoch>`에 백업하고 기본값으로 자가 치유합니다. 백업이 실패하면 원본을 보존하고 저장/자동 복구를 중단합니다.
+- 앱의 설정 읽기·복구·토글 저장은 프로세스 간 잠금으로 직렬화하며, 최초 생성은 기존 파일을 덮어쓰지 않습니다. 외부 편집기는 이 잠금에 참여하지 않으므로 실행 중 직접 편집 시 동시 저장을 피하세요.
 - 필드 값 타입만 잘못된 경우(예: 숫자를 문자열로 기입) 올바른 필드는 유지하고 잘못된 필드만 기본값으로 보정하여 프로그램이 비정상 종료되지 않습니다.
 
 ---
@@ -370,7 +384,7 @@ KakaoTalkLayoutAdBlocker_v11.exe --check-update
   - Ed25519 서명 검증 후 업데이트 헬퍼를 실행하는 업데이터 클라이언트.
 - **`crates/kakao-updater`**:
   - 전용 업데이트 헬퍼 바이너리(`kakao-updater.exe`).
-  - 앱 프로세스 정상 종료 대기, EXE 원자적 교체, 자동 재시작 및 실패 시 즉각 롤백 담당.
+  - 앱 종료 대기 후 설치 폴더에서 새 EXE와 백업을 복사·sync·검증하고 같은 볼륨의 rename으로 설치 경로를 교체합니다. 설치 경로에 직접 복사하거나 먼저 삭제하지 않습니다. 재시작/readiness 실패 시 이전 버전 복원을 시도하며, 파일 잠금은 최대 2초 재시도합니다. 전원 장애나 파일시스템 장애의 완전 무손실을 보장하지 않습니다.
 
 ### 빌드 환경 준비
 - Windows 10 / 11 (64-bit)

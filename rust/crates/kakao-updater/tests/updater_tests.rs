@@ -157,10 +157,20 @@ fn readiness_failure_rolls_back_and_success_releases_backup() {
         if mode == "ack" {
             assert!(result.is_ok(), "{result:?}");
         } else {
-            assert!(matches!(result, Err(HelperError::RelaunchFailed(_))));
+            assert!(
+                matches!(result, Err(HelperError::RelaunchFailed(_))),
+                "{mode}: {result:?}"
+            );
             assert_eq!(fs::read(&current).unwrap(), b"previous-version");
         }
-        assert!(!current.with_extension("exe.old").exists());
+        if mode == "ack" {
+            assert!(!current.with_extension("exe.old").exists());
+        } else {
+            assert_eq!(
+                fs::read(current.with_extension("exe.old")).unwrap(),
+                b"previous-version"
+            );
+        }
         // Successful child may still be running; leave its isolated executable
         // for the OS temp cleanup rather than deleting a live image.
         if mode != "ack" {

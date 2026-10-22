@@ -3,7 +3,7 @@
 ## 개요
 
 - 목적: 카카오톡 Windows 클라이언트의 광고 영역을 레이아웃 조정으로 제거
-- 버전: `11.1.12` (에디션 2024 마이그레이션 및 검증 범위는 CHANGELOG 참고)
+- 버전: `11.1.13` (후속 안정성 수정 및 검증 범위는 CHANGELOG 참고)
 - 특징: `hosts/DNS/AdFit` 제거, 트레이 중심 UX, Rust 네이티브 엔진(WinEvent + reconciliation)
 - 실행 정책: Windows 전용(비Windows에서는 fail-fast 종료 코드 `2`)
 - 기본 구현: Rust `rust/crates/kakao-app` (`kakao-adblock-rs` / `dist/KakaoTalkLayoutAdBlocker_v11.exe`)
@@ -33,10 +33,11 @@
 > 아래 "핵심 모듈" 절은 명시된 대로 **로컬 전용 Python 참고 구현(`legacy/python-v11`, Git 미추적)의 알고리즘 계약**이다.
 > Rust 기본 구현이 의도적으로 다르게 동작하는 지점은 다음과 같다. 혼동하지 말 것.
 
-- 설정/규칙 파손 백업 파일명은 Rust에서 `*.broken-<unix-epoch>`다. Python 계약의 `*.broken-YYYYMMDD-HHMMSS`가 아니다.
+- 설정/규칙 파손 백업 파일명은 Rust에서 `*.broken-<pid>-<sequence>-<unix-epoch>`다. backup create_new/sync 성공 후에만 heal하며 실패 시 원본을 보존한다. 설정 read/heal/update/bootstrap은 OS가 프로세스 종료 시 해제하는 ConfigMutex로 직렬화하고, bootstrap은 create_new로 기존 파일을 덮어쓰지 않는다. 외부 편집기는 잠금에 참여하지 않는다.
 - 트레이 상태는 v11.1.4부터 메뉴 헤더 + `NIF_TIP` 툴팁으로 노출한다(`kakao-win32/src/tray/status_text.rs`의 `status_menu_lines` / `status_tooltip`). 상태 값은 `SharedFlags`의 `main_windows`(확정 게이지), `hidden_windows`/`closed_windows`/`resized_windows`(누적), `restore_failures`(현재 실패 창 수 게이지), `last_error`에서 읽는다.
 - `EngineStatePayload.closed_windows`는 **empty `EVA_ChildWindow` close 요청 수**다. popup dismiss는 `popup_close_requests`가 따로 센다. 실제 창 소멸 확인은 순수 평가 계층이 알 수 없으므로 `SharedFlags.closed_windows`(엔진 계층)가 담당한다.
 - popup은 모든 대상 snapshot→hide/zero-size→bounded close 순서다. 건당 50ms/tick 총 100ms 요청 예산이며 enabled/apply/stopping/PID/identity/hung을 매 변이 전에 확인한다.
+- child zero-size apply는 SWP_NOMOVE로 부모 상대 offset을 보존한다. restore의 size-only 정책을 유지하며 core action/golden 계약은 변경하지 않는다. non-zero offset·깊이2의 실제 테스트 전용 Win32 창으로 회귀를 검증한다.
 - OFF는 engine/control.rs::OffRestore로 200ms~5초 재시도하며 reset도 즉시 예약한다. ON stale은 기존 tick backoff를 유지한다. restore_failures는 실제 실패 게이지이며 UI에서 먼저 0으로 지우지 않는다.
 - 종료 시 복원은 `drain_restore_all_final`로 한 번도 실패하지 않은 창부터 수행하고(`engine/restore.rs`), join 타임아웃 시 미복원 게이지(`restore_failures`)와 누적 숨김 수를 로그에 남긴다.
 - 복원 성공 판정은 `IsWindowVisible`이 아니라 창 자신의 `WS_VISIBLE` 스타일(`Win32Api::has_visible_style`)이다. 부모가 숨겨진 자식 창의 정상 복원을 실패로 세던 문제 때문이다. 복원은 top-level 창부터 수행한다.
@@ -53,7 +54,7 @@
 - `build_graph`는 top-level마다 `enum_descendant_windows` 1회 + 자손당 `GetParent` 1회로 트리를 만든다. 이전 per-node 알고리즘과의 동일성은 `kakao-app/tests/graph_build_parity.rs`가 고정한다(실데스크톱 비교는 `--ignored`).
 - 워커 tick은 `evaluate_graph_for_apply`(진단 `candidates` 미생성)를 쓰고, `--dump-tree`/`--dump-tree-series`/`--shadow`만 `evaluate_graph_with_states`를 쓴다. 두 경로의 `actions`/`state`는 동일해야 하며 `kakao-core/tests/apply_path_parity.rs`가 이를 고정한다.
 - `poll_interval_ms`는 활성(최근 2초 내 카카오톡 이벤트) 재확인 주기, `idle_poll_interval_ms`는 유휴 재확인 주기, `cache_cleanup_interval_ms`는 `states`/`stale` 캐시 정리 주기로 실제 사용된다. `idle_backoff_max_ms`(기본 1000)가 `idle_poll_interval_ms`보다 크면, 이벤트 없는 상태가 10초 지속된 뒤 10초마다 유휴 주기를 2배로 늘려 이 값까지 키운다. 이벤트가 오면 즉시 복귀하고, 훅이 없는 폴링 모드에서는 백오프하지 않는다. Python 계약의 "idle→active 약 200ms"는 이벤트 수신 경로 기준으로 유지되고, 훅 누락 시 복구 지연은 최대 `idle_backoff_max_ms`다. `start_minimized`는 트레이 전용 런타임에서 미사용이며 호환용으로만 파싱한다.
-- 새 헬퍼는 SHA-256을 받은 업데이트에서 KAKAO_UPDATE_READY_FILE로 60초 readiness와 250ms 생존을 확인한 뒤 백업을 정리한다. 앱은 env를 소비하고 트레이 루프·워커 준비 후 자기 PID로 응답한다. 실패는 child 회수 후 rollback. 교체는 rename-rename(설치본→백업, 새 파일→설치본)이며 낡은 `*.exe.old`는 교체 전 삭제한다. 두 이동 사이 중단으로 설치본이 없고 백업만 남으면 다음 실행이 백업을 먼저 복원한다. 헬퍼·재실행·readiness 자식은 `KAKAO_UPDATE_READY_FILE`·`_MEIPASS`·`_PYI_*`·`_MEI_*`를 제거한 환경으로 띄운다. 구 헬퍼에는 protocol이 없어 EXE 두 개를 함께 배치한다.
+- 헬퍼 protocol 2는 설치 폴더 sibling 파일로 새 EXE·백업을 준비하고 sync/해시 검증 후 rename으로 교체한다. 설치본을 먼저 이동/삭제하거나 설치 경로에 직접 copy하지 않는다. rollback도 같은 경로이며 Windows 잠금 오류는 최대 2초 재시도한다. SHA-256 업데이트는 KAKAO_UPDATE_READY_FILE의 60초 readiness/250ms 생존 후 백업을 정리한다. 실패 rollback은 backup을 보존한다. `kakao-updater.exe --recover --current <path>` 또는 같은 폴더 helper 더블클릭으로 기존/누락 설치본을 backup에서 복원할 수 있다. 전원 장애 무손실 보장은 하지 않는다. child 환경의 handshake/PyInstaller marker 제거 정책을 유지한다. 앱은 종료 전 `--protocol-version`을 2초 timeout으로 검사하며 구 helper는 최신 ZIP 두 EXE 동시 설치를 안내한다. helper 자동 배포는 하지 않는다.
 - DEBUG kakao_latency는 PID·event age·graph/evaluate/apply/first hide 시간을 기록한다(사용자 텍스트 없음). series는 elapsed_ms/capture_us를 포함한다. docs/testing/LATENCY_VALIDATION.md 참고.
 - 성능 측정용 읽기 전용 프로브: `cargo test --release -p kakao-app --test perf_probe -- --ignored --nocapture`.
 - `--self-check`는 APPDATA 쓰기, `HKCU Run` 읽기/쓰기 접근, Run 등록 명령 health, 프로세스 열거를 점검한다. 경고는 `core_warnings`(strict에서 실패)와 `info_warnings`(설정 자동 복구 등, strict에서도 통과)로 분리한다.
@@ -190,7 +191,7 @@
 - `scripts/build_release.ps1`는 빌드 시작 시 `VERSION`과 `packaging/windows_version_info.txt` 동기화를 검증하고, 기본값으로 built EXE에 `--self-check --strict-self-check --json` packaged smoke를 1회 수행하며, core failure만 빌드 실패로 취급한다. 필요 시 `-SkipSmokeCheck`로 비활성화 가능
 - interactive shell이 감지되면 built EXE에 `--startup-launch --minimized --startup-trace ... --exit-after-startup-ms ...` startup smoke를 추가 수행하고, 60초 timeout으로 멈춤을 차단하며, 비interactive 환경에서는 skip 기록만 남기고 계속 진행한다
 - `-StrictStartupSmoke`는 interactive startup smoke가 실제 수행된 경우에만 tray unavailable / tray start warning을 빌드 실패로 승격한다
-- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 self-check JSON, no-sign packaging build와 packaged strict self-check를 검증하고, interactive tray/startup smoke는 강제하지 않는다
+- GitHub Actions workflow `.github/workflows/windows-ci.yml`는 hosted Windows에서 `scripts/build_release.ps1 -NoSign`의 패키징/strict self-check를 검증한다. CI에서는 interactive tray/startup smoke를 생략한다. 실기 증거는 docs/testing/AUDIT_FOLLOWUP_VALIDATION.md와 전용 VM 절차로 구분한다.
 
 ## 동작 규칙
 
@@ -203,7 +204,7 @@
 7. 비메인 top-level 창의 descendant(depth<=`popup_search_depth`)가 `AdFitWebView` 등 `popup_ad_classes`에 매치되더라도 기본값에서는 empty host title 또는 allowlist match일 때만 host와 matched popup descendant만 close/hide/zero-size 처리
 8. 시작프로그램 토글은 레지스트리 갱신 성공 시에만 설정 파일에 반영하며, 소스 모드 자동 동기화는 유효한 패키지 EXE Run 등록을 덮어쓰지 않는다
 9. `--dump-tree`는 UI 모듈을 로딩하지 않는 경량 경로로 동작
-10. `--self-check`는 UI/엔진을 기동하지 않고 APPDATA/logging bootstrap/tasklist/레지스트리/Run 등록 명령/트레이 환경 진단만 수행하며, 기본 모드의 트레이 경고는 optional이고 `--strict-self-check`에서는 core로 취급
+10. Rust `--self-check`는 UI/엔진을 기동하지 않고 APPDATA 쓰기/레지스트리 Run 접근·명령 health/프로세스 열거를 진단한다. strict는 core_warnings만 실패시키고 info_warnings는 통과한다. 트레이 등록 성공 여부는 검사하지 않는다.
 11. 일반 UI 실행은 named mutex로 단일 인스턴스만 허용하고, self-check/dump 계열 진단 명령은 mutex 밖에서 실행
 12. Win32 text read failure/unknown popup host는 empty title로 간주하지 않고 popup dismiss guard blocked로 처리
 13. 시작 경고 상태 반영은 `복구 실패 > 자동 복구 > 기타` 우선순위로 1건 노출

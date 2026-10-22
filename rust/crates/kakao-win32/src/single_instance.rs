@@ -35,6 +35,40 @@ impl Drop for InstanceMutex {
 #[derive(Debug)]
 pub struct AlreadyRunning;
 
+/// Serialize configuration transactions across diagnostics and tray processes.
+/// The OS releases ownership on process termination (including abandonment).
+pub struct ConfigMutex(HANDLE);
+impl ConfigMutex {
+    pub fn acquire() -> std::io::Result<Self> {
+        use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
+        use windows::Win32::System::Threading::WaitForSingleObject;
+        let handle = unsafe {
+            CreateMutexW(
+                None,
+                false,
+                w!("Local\\KakaoTalkLayoutAdBlocker_Config_v11"),
+            )
+        }
+        .map_err(std::io::Error::other)?;
+        let result = unsafe { WaitForSingleObject(handle, 5000) };
+        if result == WAIT_OBJECT_0 || result == WAIT_ABANDONED {
+            Ok(Self(handle))
+        } else {
+            let _ = unsafe { CloseHandle(handle) };
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "configuration is busy",
+            ))
+        }
+    }
+}
+impl Drop for ConfigMutex {
+    fn drop(&mut self) {
+        let _ = unsafe { windows::Win32::System::Threading::ReleaseMutex(self.0) };
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

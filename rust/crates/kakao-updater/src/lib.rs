@@ -3,7 +3,11 @@ use std::process::Command;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
-use tracing::{error, info, warn};
+use tracing::{error, info};
+
+mod transaction;
+pub use transaction::{PreparedInstall, restore_previous_version};
+pub const HELPER_PROTOCOL: &str = "kakao-updater-protocol-2";
 
 #[derive(Debug, thiserror::Error)]
 pub enum HelperError {
@@ -256,6 +260,15 @@ pub fn update_executable_with(
     if !replacement.exists() {
         return Err(HelperError::ReplacementMissing(replacement.to_path_buf()));
     }
+    let source = replacement.canonicalize().ok();
+    if source.is_some()
+        && (source == current.canonicalize().ok()
+            || source == backup_path_for(current).canonicalize().ok())
+    {
+        return Err(HelperError::ReplaceFailed(
+            "replacement must be a separate download".into(),
+        ));
+    }
     let meta = std::fs::metadata(replacement)
         .map_err(|_e| HelperError::ReplacementMissing(replacement.to_path_buf()))?;
     if meta.len() == 0 {
@@ -274,55 +287,11 @@ pub fn update_executable_with(
         info!("staged update re-verified before replacement");
     }
 
-    // 3. Prepare backup path: overwrite a stale backup from a previous
-    // attempt so the next run never fails with "backup already exists".
-    // Removal failure is logged; the rename below then reports `BackupFailed`
-    // with the installed exe still in place.
+    // Prepare and sync both sibling files while current remains executable.
+    // A preparation/commit error leaves current intact and preserves backups.
+    PreparedInstall::prepare(current, replacement, options.expected_sha256.as_deref())?.commit()?;
     let backup = backup_path_for(current);
-    if backup.exists()
-        && let Err(err) = std::fs::remove_file(&backup)
-    {
-        warn!(
-            backup = %backup.display(),
-            %err,
-            "stale update backup could not be removed before swap"
-        );
-    }
-
-    // 4. Rename current -> current.exe.old
-    if let Err(err) = std::fs::rename(current, &backup) {
-        error!(%err, "failed to rename current executable to backup");
-        return Err(HelperError::BackupFailed(err.to_string()));
-    }
-
-    // 5. Move replacement -> current
-    let replace_res = if let Err(err) = std::fs::rename(replacement, current) {
-        // Fallback to copy and remove in case of cross-device temp folder
-        match std::fs::copy(replacement, current) {
-            Ok(_) => {
-                let _ = std::fs::remove_file(replacement);
-                Ok(())
-            }
-            Err(copy_err) => {
-                error!(rename_err = %err, %copy_err, "failed to move replacement into place");
-                Err(HelperError::ReplaceFailed(format!("{err}; {copy_err}")))
-            }
-        }
-    } else {
-        Ok(())
-    };
-
-    if let Err(replace_err) = replace_res {
-        // Rollback backup -> current
-        warn!("attempting rollback after replacement failure");
-        if let Err(rb_err) = std::fs::rename(&backup, current) {
-            error!(%rb_err, "catastrophic: rollback failed");
-            return Err(HelperError::RollbackFailed(format!(
-                "{replace_err}; rollback error: {rb_err}"
-            )));
-        }
-        return Err(replace_err);
-    }
+    let _ = std::fs::remove_file(replacement);
 
     // 6. Relaunch new version if requested
     if relaunch {
@@ -333,11 +302,9 @@ pub fn update_executable_with(
         cmd.args(&options.relaunch_args);
         if let Err(err) = launch_verified(&mut cmd, options.readiness_timeout) {
             error!(%err, "new app did not become ready; rolling back");
-            // launch_verified reaps our child before returning an error, so
-            // Windows no longer has its image locked during rollback.
-            let _ = std::fs::remove_file(current);
-            std::fs::rename(&backup, current)
-                .map_err(|rb| HelperError::RollbackFailed(format!("{err}; {rb}")))?;
+            // launch_verified reaps our child first. Windows image mappings may
+            // linger briefly; restore retries replacement without deleting it.
+            restore_previous_version(current)?;
             return Err(HelperError::RelaunchFailed(err));
         }
     }

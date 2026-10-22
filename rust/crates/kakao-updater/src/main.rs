@@ -15,14 +15,20 @@ use tracing::{error, info};
     about = "KakaoTalk Layout AdBlocker updater helper"
 )]
 struct Cli {
+    /// Print compatibility token without touching files or launching the app.
+    #[arg(long)]
+    protocol_version: bool,
+    /// Restore the backup; defaults to the packaged app beside this helper.
+    #[arg(long, conflicts_with = "replacement")]
+    recover: bool,
     #[arg(long, default_value_t = 0)]
     pid: u32,
 
-    #[arg(long)]
-    current: PathBuf,
+    #[arg(long, required_unless_present_any = ["recover", "protocol_version"])]
+    current: Option<PathBuf>,
 
-    #[arg(long)]
-    replacement: PathBuf,
+    #[arg(long, required_unless_present_any = ["recover", "protocol_version"])]
+    replacement: Option<PathBuf>,
 
     #[arg(long, default_value_t = 30)]
     timeout_secs: u64,
@@ -66,12 +72,45 @@ fn main() {
         )
         .try_init();
 
-    let args = Cli::parse();
+    let mut raw: Vec<_> = std::env::args_os().collect();
+    if raw.len() == 1 {
+        raw.push("--recover".into());
+    }
+    let args = Cli::parse_from(raw);
+    if args.protocol_version {
+        println!("{}", kakao_updater::HELPER_PROTOCOL);
+        return;
+    }
+    let current = args.current.clone().unwrap_or_else(|| {
+        std::env::current_exe()
+            .expect("helper path")
+            .with_file_name("KakaoTalkLayoutAdBlocker_v11.exe")
+    });
+    if args.recover {
+        let result =
+            kakao_updater::wait_for_process_exit(args.pid, Duration::from_secs(args.timeout_secs))
+                .and_then(|()| kakao_updater::restore_previous_version(&current));
+        if let Err(err) = result {
+            show_error_dialog(&format!(
+                "{err}\n차단기를 종료한 뒤 다시 시도하세요. 백업은 보존됩니다."
+            ));
+            std::process::exit(1);
+        }
+        if !args.no_relaunch && !relaunch_previous(&current, &args.relaunch_arg) {
+            show_error_dialog("이전 버전을 복원했지만 실행하지 못했습니다. 백업은 보존됩니다.");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let replacement = args
+        .replacement
+        .as_ref()
+        .expect("clap requires replacement");
     let relaunch = !args.no_relaunch;
 
     match update_executable_with(
-        &args.current,
-        &args.replacement,
+        &current,
+        replacement,
         args.pid,
         Duration::from_secs(args.timeout_secs),
         &UpdateOptions {
@@ -87,12 +126,19 @@ fn main() {
         }
         Err(err) => {
             error!(%err, "update helper failed");
-            discard_replacement(&args.replacement);
+            // A malformed manual invocation must never delete the installed
+            // image by treating it as a failed download.
+            if replacement.canonicalize().ok() != current.canonicalize().ok()
+                && replacement.canonicalize().ok()
+                    != kakao_updater::backup_path_for(&current).canonicalize().ok()
+            {
+                discard_replacement(replacement);
+            }
             // Start the previous version first so the user is not left
             // without the tray app while the error dialog is open.
             let relaunched = relaunch
                 && should_relaunch_previous(&err)
-                && relaunch_previous(&args.current, &args.relaunch_arg);
+                && relaunch_previous(&current, &args.relaunch_arg);
             let message = if relaunched {
                 format!(
                     "{err}

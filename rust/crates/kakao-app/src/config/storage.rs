@@ -31,6 +31,26 @@ pub fn load_rules(path: &Path) -> (LayoutRules, Vec<String>) {
 }
 
 pub(super) fn load_json_value(path: &Path, label: &str) -> (Value, Vec<String>) {
+    match config_lock() {
+        Ok(_guard) => load_json_value_unlocked(path, label),
+        Err(err) => (
+            Value::Object(Default::default()),
+            vec![format!("{label} 설정 잠금 실패: {err}")],
+        ),
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn config_lock() -> io::Result<kakao_win32::single_instance::ConfigMutex> {
+    kakao_win32::single_instance::ConfigMutex::acquire()
+}
+#[cfg(not(windows))]
+pub(super) fn config_lock() -> io::Result<std::sync::MutexGuard<'static, ()>> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    Ok(LOCK.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+pub(super) fn load_json_value_unlocked(path: &Path, label: &str) -> (Value, Vec<String>) {
     let mut warnings = Vec::new();
     cleanup_broken_backups(path);
     if !path.is_file() {
@@ -44,13 +64,14 @@ pub(super) fn load_json_value(path: &Path, label: &str) -> (Value, Vec<String>) 
             match serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
                 Ok(Value::Object(map)) => (Value::Object(map), warnings),
                 Ok(_) => {
-                    backup_broken(path, label, "최상위 타입이 object가 아님", &mut warnings);
-                    heal_default(path, label, &mut warnings);
+                    let backed_up =
+                        backup_broken(path, label, "최상위 타입이 object가 아님", &mut warnings);
+                    heal_after_backup(path, label, &mut warnings, backed_up);
                     (Value::Object(Default::default()), warnings)
                 }
                 Err(_) => {
-                    backup_broken(path, label, "JSON 파싱 실패", &mut warnings);
-                    heal_default(path, label, &mut warnings);
+                    let backed_up = backup_broken(path, label, "JSON 파싱 실패", &mut warnings);
+                    heal_after_backup(path, label, &mut warnings, backed_up);
                     (Value::Object(Default::default()), warnings)
                 }
             }
@@ -62,18 +83,40 @@ pub(super) fn load_json_value(path: &Path, label: &str) -> (Value, Vec<String>) 
     }
 }
 
-fn backup_broken(path: &Path, label: &str, reason: &str, warnings: &mut Vec<String>) {
+fn backup_broken(path: &Path, label: &str, reason: &str, warnings: &mut Vec<String>) -> bool {
     let stamp = timestamp();
     let backup = path.with_file_name(format!(
-        "{}.broken-{stamp}",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+        "{}.broken-{}-{}-{stamp}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, AtomicOrdering::Relaxed)
     ));
-    match fs::copy(path, &backup) {
+    let result = (|| -> io::Result<()> {
+        let mut input = fs::File::open(path)?;
+        // Never truncate another backup, including one from the same second.
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup)?;
+        io::copy(&mut input, &mut output)?;
+        output.sync_all()
+    })();
+    let success = result.is_ok();
+    match result {
         Ok(_) => warnings.push(format!(
             "{label} 손상 감지: {reason}. 백업 생성: {}.",
             backup.display()
         )),
-        Err(err) => warnings.push(format!("{label} 손상 감지: {reason}. 백업 실패({err}).")),
+        Err(err) => warnings.push(format!(
+            "{label} 손상 감지: {reason}. 백업 실패({err}). 원본 보존: 자동 복구/저장을 중단합니다."
+        )),
+    }
+    success
+}
+
+fn heal_after_backup(path: &Path, label: &str, warnings: &mut Vec<String>, backed_up: bool) {
+    if backed_up {
+        heal_default(path, label, warnings);
     }
 }
 
@@ -107,7 +150,10 @@ pub fn atomic_write(path: &Path, text: &str) -> io::Result<()> {
         TMP_SEQ.fetch_add(1, AtomicOrdering::Relaxed)
     ));
     let write_result = (|| -> io::Result<()> {
-        let mut file = fs::File::create(&tmp)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         file.write_all(text.as_bytes())?;
         // flush() only reaches the OS cache; without sync_all a power loss
         // right after the rename can leave an empty file that self-heals to
@@ -134,12 +180,18 @@ const BROKEN_BACKUP_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 
 pub fn ensure_runtime_files(paths: &RuntimePaths) -> Vec<String> {
     let mut warnings = Vec::new();
+    let _guard = match config_lock() {
+        Ok(guard) => guard,
+        Err(err) => return vec![format!("설정 잠금 실패: {err}")],
+    };
     if let Err(err) = fs::create_dir_all(&paths.appdata_dir) {
         warnings.push(format!("APPDATA 디렉터리 생성 실패: {err}"));
         return warnings;
     }
     if !paths.settings_file.is_file() {
-        match super::settings::save_settings(&paths.settings_file, &AppSettings::default()) {
+        let body =
+            serde_json::to_string_pretty(&AppSettings::default()).expect("settings serializable");
+        match create_default(&paths.settings_file, &body) {
             Ok(()) => {}
             Err(err) => warnings.push(format!("layout_settings_v11.json 기본값 생성 실패: {err}")),
         }
@@ -147,11 +199,25 @@ pub fn ensure_runtime_files(paths: &RuntimePaths) -> Vec<String> {
     if !paths.rules_file.is_file() {
         let body =
             serde_json::to_string_pretty(&LayoutRules::default()).unwrap_or_else(|_| "{}".into());
-        if let Err(err) = atomic_write(&paths.rules_file, &format!("{body}\n")) {
+        if let Err(err) = create_default(&paths.rules_file, &body) {
             warnings.push(format!("layout_rules_v11.json 기본값 생성 실패: {err}"));
         }
     }
     warnings
+}
+
+fn create_default(path: &Path, text: &str) -> io::Result<()> {
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    file.write_all(text.as_bytes())?;
+    file.sync_all()
 }
 
 fn cleanup_broken_backups(path: &Path) {
@@ -189,7 +255,7 @@ fn cleanup_broken_backups(path: &Path) {
         }
         true
     });
-    backups.sort();
+    backups.sort_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
     let keep = 10usize;
     if backups.len() > keep {
         for old in backups.iter().take(backups.len() - keep) {
@@ -204,4 +270,34 @@ fn timestamp() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     format!("{secs}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_backup_never_heals_and_bootstrap_never_overwrites() {
+        let dir = std::env::temp_dir().join(format!(
+            "kakao-backup-fault-{}-{}",
+            std::process::id(),
+            TMP_SEQ.fetch_add(1, AtomicOrdering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        fs::write(&path, b"{recoverable broken input").unwrap();
+        let mut warnings = Vec::new();
+        // Failure is injected at the real backup→heal boundary.
+        heal_after_backup(&path, "settings", &mut warnings, false);
+        assert_eq!(fs::read(&path).unwrap(), b"{recoverable broken input");
+        create_default(&path, "{}").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{recoverable broken input");
+        assert!(!backup_broken(
+            &dir.join("missing"),
+            "settings",
+            "invalid",
+            &mut warnings
+        ));
+        assert!(warnings.iter().any(|w| w.contains("원본 보존")));
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

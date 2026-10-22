@@ -14,6 +14,89 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
 static CLOSE_VISIBILITY: AtomicU32 = AtomicU32::new(0);
+
+#[test]
+fn nested_popup_child_keeps_offset_after_zero_size_and_restore() {
+    // Only windows owned by this test are targeted. STATIC uses the OS class.
+    unsafe {
+        let parent = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!("audit-parent"),
+            WS_POPUP | WS_VISIBLE,
+            -32000,
+            -32000,
+            300,
+            200,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        struct Cleanup(HWND);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let _cleanup = Cleanup(parent);
+        let wrapper = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!("wrapper"),
+            WS_CHILD | WS_VISIBLE,
+            10,
+            20,
+            200,
+            150,
+            Some(parent),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let child = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!("child"),
+            WS_CHILD | WS_VISIBLE,
+            25,
+            35,
+            120,
+            80,
+            Some(wrapper),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let child_id = child.0 as isize as i64;
+        let parent_id = parent.0 as isize as i64;
+        let api = RealWin32::new();
+        let before = api.get_window_rect(child_id).unwrap();
+        let pid = i64::from(std::process::id());
+        let graph = kakao_app::graph_build::build_graph(&api, &[pid]);
+        let mut evaluation = Evaluation::default();
+        evaluation.actions.hide = vec![parent_id, child_id];
+        evaluation.actions.set_pos = vec![vec![parent_id, 0, 0, 0, 0], vec![child_id, 0, 0, 0, 0]];
+        let flags = SharedFlags::from_settings(&AppSettings::default(), true);
+        let mut caches = EngineCaches::new();
+        apply_evaluation(
+            &api,
+            &graph,
+            &evaluation,
+            &mut caches.snapshots,
+            &HashSet::from([pid]),
+            &flags,
+        );
+        assert_eq!(api.get_window_rect(child_id).unwrap().width(), 0);
+        assert_eq!(caches.drain_restore_all(&api), (0, String::new()));
+        assert_eq!(api.get_window_rect(child_id), Some(before));
+        assert!(api.has_visible_style(child_id));
+        assert!(caches.snapshots.is_empty());
+    }
+}
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_CLOSE => {

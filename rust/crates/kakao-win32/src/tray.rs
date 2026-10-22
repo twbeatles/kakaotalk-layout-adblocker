@@ -22,7 +22,7 @@ pub use command::{
     ID_CHECK_UPDATE, ID_EXIT, ID_OPEN_LOGS, ID_OPEN_RELEASES, ID_RESET_RESTORE,
     ID_TOGGLE_AGGRESSIVE, ID_TOGGLE_ENABLED, ID_TOGGLE_STARTUP, TrayCommand,
 };
-pub use host::{request_exit, run_loop, run_loop_with_ready};
+pub use host::{request_existing_exit, request_exit, run_loop, run_loop_with_ready};
 pub use menu::shell_open;
 pub use shell_ready::{
     continue_message_loop_without_icon, notify_icon_retry_delays, wait_for_shell_ready,

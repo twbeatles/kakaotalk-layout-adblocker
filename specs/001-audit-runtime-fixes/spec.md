@@ -24,5 +24,9 @@
 - fmt/clippy/workspace tests pass; no dependencies installed and no live user data changed.
 
 ## Assumptions
+- 2026-10-22 follow-up: preserve installed EXE and backup on interrupted updates; provide explicit helper recovery and protocol compatibility checks.
+- Recover transient tray registration failures and allow graceful exit without an icon. Preserve non-zero child offsets through zero-size/restore.
+- Protect configuration backup/healing and concurrent writes; report toggle/rollback/shell failures; retry transient HTTP failures within bounded time.
+- Align CI/documentation guarantees and add deterministic regressions. Dedicated VM/platform/visual/soak evidence remains pending; no live user data changes.
 - Windows-only layout control remains the product boundary. Zero-frame visibility cannot be guaranteed.
 - Real screen latency, Windows 10/ARM64/DPI matrix, and soak require a dedicated manual session.

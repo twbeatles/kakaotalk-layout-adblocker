@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-pub const VERSION: &str = "11.1.12";
+pub const VERSION: &str = "11.1.13";
 pub const APPDATA_DIRNAME: &str = "KakaoTalkAdBlockerLayout";
 pub const SETTINGS_FILE: &str = "layout_settings_v11.json";
 pub const RULES_FILE: &str = "layout_rules_v11.json";

@@ -163,9 +163,69 @@ pub fn current_command() -> Option<String> {
     }
 }
 
+/// Keep disk settings unchanged until the registry operation commits; restore
+/// the exact previous command (including custom arguments) on any failure.
+pub fn commit_toggle<T>(
+    change: impl FnOnce() -> bool,
+    save: impl FnOnce() -> std::io::Result<T>,
+    rollback: impl FnOnce() -> bool,
+) -> Result<T, String> {
+    let result = if change() {
+        save().map_err(|e| format!("설정 저장 실패: {e}"))
+    } else {
+        Err("시작프로그램 변경 실패".into())
+    };
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) => Err(format!(
+            "{err}; 이전 등록 복구 {}",
+            if rollback() {
+                "성공"
+            } else {
+                "실패: 시작 앱 상태를 확인하세요"
+            }
+        )),
+    }
+}
+
+pub fn restore_command(command: Option<&str>) -> bool {
+    #[cfg(windows)]
+    return match command {
+        Some(command) => kakao_win32::startup::set_run_command(command),
+        None => kakao_win32::startup::delete_run_command(),
+    };
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_toggle_restores_exact_command_and_reports_rollback_failure() {
+        use std::cell::RefCell;
+        let command = RefCell::new(Some("custom.exe --custom".to_string()));
+        let previous = command.borrow().clone();
+        let result: Result<(), _> = commit_toggle(
+            || {
+                *command.borrow_mut() = None;
+                true
+            },
+            || Err(std::io::Error::other("disk full")),
+            || {
+                *command.borrow_mut() = previous.clone();
+                true
+            },
+        );
+        assert!(result.unwrap_err().contains("disk full"));
+        assert_eq!(*command.borrow(), previous);
+        let result: Result<(), _> = commit_toggle(|| false, || panic!("must not save"), || false);
+        assert!(result.unwrap_err().contains("실패"));
+    }
     use std::path::Path;
 
     #[test]

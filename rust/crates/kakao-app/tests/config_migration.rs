@@ -11,6 +11,48 @@ fn repo_root() -> PathBuf {
 }
 
 #[test]
+fn concurrent_updates_preserve_both_fields_and_bootstrap_does_not_overwrite() {
+    let dir = unique_temp_dir("concurrent");
+    let path = dir.join("layout_settings_v11.json");
+    save_settings(&path, &AppSettings::default()).unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let mut threads = Vec::new();
+    for first in [false, true] {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        threads.push(std::thread::spawn(move || {
+            barrier.wait();
+            kakao_app::config::update_settings(&path, &AppSettings::default(), |s| {
+                if first {
+                    s.enabled = false;
+                } else {
+                    s.aggressive_mode = false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            })
+            .unwrap();
+        }));
+    }
+    barrier.wait();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    let (settings, warnings) = load_settings(&path);
+    assert!(warnings.is_empty());
+    assert!(!settings.enabled && !settings.aggressive_mode);
+    let before = fs::read(&path).unwrap();
+    let paths = kakao_app::config::RuntimePaths {
+        appdata_dir: dir.clone(),
+        settings_file: path.clone(),
+        rules_file: dir.join("rules.json"),
+        log_file: dir.join("log"),
+    };
+    assert!(kakao_app::config::ensure_runtime_files(&paths).is_empty());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn legacy_settings_v11_loads_and_preserves_fields() {
     let fixture_path = repo_root().join("tests/fixtures/config/legacy_python_settings.json");
     let (settings, warnings) = load_settings(&fixture_path);
@@ -197,6 +239,44 @@ fn unique_temp_dir(label: &str) -> PathBuf {
     ));
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+#[cfg(windows)]
+#[test]
+fn concurrent_process_updates_do_not_lose_increments() {
+    let dir = unique_temp_dir("process_lock");
+    let path = dir.join("settings.json");
+    save_settings(&path, &AppSettings::default()).unwrap();
+    let mut children = Vec::new();
+    for _ in 0..2 {
+        children.push(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "config_update_child"])
+                .env("KAKAO_TEST_CONFIG_PATH", &path)
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for mut child in children {
+        assert!(child.wait().unwrap().success());
+    }
+    assert_eq!(load_settings(&path).0.poll_interval_ms, 70);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn config_update_child() {
+    let Some(path) = std::env::var_os("KAKAO_TEST_CONFIG_PATH").map(PathBuf::from) else {
+        return;
+    };
+    for _ in 0..10 {
+        kakao_app::config::update_settings(&path, &AppSettings::default(), |s| {
+            s.poll_interval_ms += 1;
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        })
+        .unwrap();
+    }
 }
 
 fn has_broken_backup(dir: &std::path::Path) -> bool {

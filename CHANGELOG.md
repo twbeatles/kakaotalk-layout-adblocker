@@ -1,5 +1,15 @@
 # Changelog
 
+## 11.1.13 - 2026-10-23
+
+- 업데이트: 설치 경로에 직접 복사하거나 먼저 삭제하지 않고 sibling staging/백업을 sync한 뒤 교체한다. 종료 직후 Windows 이미지 잠금은 제한적으로 재시도하고 rollback 백업을 보존한다.
+- 헬퍼: protocol 2 사전 확인, `--recover --current <path>`와 같은 폴더 helper 실행에 의한 백업 복구. 구 helper 사용자는 최신 ZIP의 두 EXE 동시 교체가 필요하다.
+- 트레이: Explorer 재등록 실패에도 타이머 재시도. 아이콘 없이 종료/복원 요청하는 `--exit` 추가.
+- 복원: zero-size 팝업 child의 부모 상대 위치를 유지한다. 광고 판정/core action/golden fixture 계약은 변경하지 않았다.
+- 설정: 프로세스 간 저장 잠금, non-overwriting bootstrap, 고유 파손 백업 및 backup 실패 시 원본 보존. 토글/시작프로그램 역롤백/폴더·링크 열기 실패를 사용자에게 알린다.
+- HTTP: 제한된 일시 오류 재시도와 매니페스트 수신 크기 제한. CI는 실제 no-sign packaging/strict self-check를 호출하도록 정렬했다.
+- 구현 및 자동 검증 결과와 미실행 실기 항목은 `docs/testing/AUDIT_FOLLOWUP_VALIDATION.md`에 기록한다. 배포 자산은 Windows 릴리스 워크플로에서 빌드·서명 매니페스트 생성 후 게시한다.
+
 ## 11.1.12 - 2026-10-21
 
 셀프 업데이트 교체 경로 안정화. 광고 판정 규칙·알고리즘은 바꾸지 않았다.

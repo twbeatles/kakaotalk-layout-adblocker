@@ -1,5 +1,6 @@
 # Tasks - audit runtime fixes
 
+
 ## Setup
 - [x] T001 Record specification and implementation decisions in specs/001-audit-runtime-fixes/spec.md and plan.md.
 
@@ -41,3 +42,18 @@ Additional correction: update_settings now overlays valid external fields onto t
 - git diff --check: pass. Core classifier and fixtures unchanged.
 - An MSVC internal linker failure during an earlier parallel test build was resolved by a serial retry. Incremental-cache hard-link warnings are environment diagnostics, not application lint failures.
 - See docs/testing/AUDIT_FIX_VALIDATION.md for exact scope/performance and T012 for remaining manual evidence.
+
+## Phase Convergence — 2026-10-22 functional audit
+
+- [x] T013 Synced same-directory update/backup preparation, replacement without absent-current window, interruption/rollback regressions.
+- [x] T014 Helper recovery entry point and protocol check before shutdown; document two-EXE upgrades.
+- [x] T015 Retry all tray re-registration failures and add graceful CLI exit without icon; injected failure tests.
+- [x] T016 Preserve non-zero nested popup child offsets through OFF/stale restore; native coordinate regression.
+- [x] T017 Serialize config operations, non-overwriting bootstrap, backup-before-heal, failure/concurrency tests.
+- [x] T018 Surface toggle/rollback/shell failures and preserve exact startup command on rollback; regression tests.
+- [x] T019 Bounded transient HTTP retry with injected failures, no live network tests.
+- [x] T020 Correct docs and CI strict/package gate; document recovery/manual validation procedures.
+- [x] T021 Run fmt/clippy/workspace/build and isolated smoke; record audit resolution status.
+- [ ] T022 Dedicated VM/manual: cross-volume forced interruption, Explorer restart, Windows/architecture/DPI matrix, authorized KakaoTalk flows and soak (NOT RUN).
+
+Final follow-up automated validation (2026-10-23): 196 passed / 0 failed / 2 ignored (child summaries deduplicated); fmt/clippy/release build and isolated packaged strict self-check/helper recovery passed. T022 remains NOT RUN; see docs/testing/AUDIT_FOLLOWUP_VALIDATION.md.

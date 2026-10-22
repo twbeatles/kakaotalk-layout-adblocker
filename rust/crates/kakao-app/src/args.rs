@@ -7,6 +7,9 @@ use crate::config::VERSION;
 #[derive(Parser, Debug)]
 #[command(name = "kakao-adblock-rs", version = VERSION)]
 pub struct Args {
+    /// Ask the running instance to restore its windows and exit.
+    #[arg(long)]
+    pub exit: bool,
     #[arg(long)]
     pub minimized: bool,
     #[arg(long, hide = true)]

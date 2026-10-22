@@ -56,24 +56,10 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      - name: Release Build
-        run: cargo build --release -p kakao-app -p kakao-updater
-
-      - name: Copy Release Artifact
+      - name: Build and Strict Packaged Self Check
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
-          Copy-Item -Force .\target\release\kakao-adblock-rs.exe ..\dist\KakaoTalkLayoutAdBlocker_v11.exe
-          Copy-Item -Force .\target\release\kakao-updater.exe ..\dist\kakao-updater.exe
-
-      - name: Packaged Self Check
-        shell: pwsh
-        run: ..\dist\KakaoTalkLayoutAdBlocker_v11.exe --self-check --json
-
-      - name: Pack Release Zip
-        shell: pwsh
-        run: |
-          Compress-Archive -Force -Path ..\dist\KakaoTalkLayoutAdBlocker_v11.exe,..\dist\kakao-updater.exe -DestinationPath ..\dist\KakaoTalkLayoutAdBlocker_v11.zip
+        working-directory: .
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -NoSign
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
