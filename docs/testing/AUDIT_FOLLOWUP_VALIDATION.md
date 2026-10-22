@@ -18,7 +18,7 @@
 | 파일 복구·경합 | Windows named ConfigMutex, unique backup create_new/sync, backup 실패 시 heal/토글 저장 거절, bootstrap create_new. | thread 및 별도 두 프로세스 read-modify-write, backup 실패 경계, 기존 bootstrap 파일 보존 |
 | HTTP | 최대 3회 요청, 200/500ms backoff, 요청당 기존 90초 timeout. 일시 transport/408/429/일부5xx만 재시도. signature/hash 검증은 retry 밖. | injected 503→503→성공, 404 즉시 실패, 429 3회 제한. 라이브 GitHub 장애 실험은 하지 않음 |
 | 구조 | 파일 교체를 transaction 모듈로 분리. shell add와 timer 간 경계, retry 및 startup 저장 경계를 테스트 가능하게 구성. | 기존 classifier/golden 회귀 유지. 일반 리팩터링이나 광고 휴리스틱 변경 없음 |
-| 문서·CI | strict/core/info·복원 한도·업데이트 교체·트레이 설명 정정. windows-ci가 build_release.ps1 -NoSign 호출. | workflow는 로컬 검토만 수행; GitHub Actions 실행 결과로 표기하지 않음 |
+| 문서·CI | strict/core/info·복원 한도·업데이트 교체·트레이 설명 정정. windows-ci가 build_release.ps1 -NoSign 호출. | `v11.1.13` release workflow 성공. Windows CI 실행 상태는 아래 배포 기록에 별도 기재 |
 
 ## 자동 검증
 
@@ -42,7 +42,9 @@ cargo build --release --locked -p kakao-app -p kakao-updater
 
 ## 11.1.13 릴리스 빌드 확인
 
-`scripts/build_release.ps1 -NoSign -DistDir dist_release_11_1_13`가 앱·helper·ZIP을 빌드하고 packaged strict self-check를 통과했다. 스크립트의 대화형 startup smoke는 추적 파일을 만들지 못해 실패했으며, CI와 같은 `CI=true` 환경에서 재실행해 smoke는 의도대로 skip되고 패키징은 통과했다. 기존 `dist/` 앱 파일은 다른 프로세스가 열고 있어 덮어쓰지 않았다. 로컬 빌드는 코드 서명을 생략했다. 실제 태그 배포 워크플로는 별도 실행 결과로 확인한다.
+`scripts/build_release.ps1 -NoSign -DistDir dist_release_11_1_13`가 앱·helper·ZIP을 빌드하고 packaged strict self-check를 통과했다. 검증 산출물은 무시 대상인 `build/release_11_1_13`에 보관했다. 스크립트의 대화형 startup smoke는 추적 파일을 만들지 못해 실패했으며, CI와 같은 `CI=true` 환경에서 재실행해 smoke는 의도대로 skip되고 패키징은 통과했다. 기존 `dist/` 앱 파일은 다른 프로세스가 열고 있어 덮어쓰지 않았다. 로컬 빌드는 코드 서명을 생략했다.
+
+GitHub `release` workflow run `39872680811`은 workspace 테스트, 릴리스 빌드, 서명 매니페스트 생성, 업로드 및 공개 매니페스트 검증까지 모두 성공했다. 공개 태그는 `v11.1.13`이며 앱 EXE, `kakao-updater.exe`, ZIP, `update.json`이 게시됐다. Windows CI run `39872671703`은 확인 시점에 진행 중이었다.
 
 ## 전용 VM 수동 절차 — 모두 NOT RUN
 
