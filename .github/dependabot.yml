@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Cargo.lock를 최신 상태로 유지한다. 새로운 RUSTSEC 권고가 나오면
+  # Dependabot PR의 CI(audit 단계)에서 먼저 감지되므로,
+  # main 푸시가 windows-ci Audit 단계에서 깨지는 일을 방지한다.
+  - package-ecosystem: "cargo"
+    directory: "/rust"
+    schedule:
+      interval: "weekly"
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "rust"
