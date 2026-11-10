@@ -1,0 +1,8 @@
+# kakaotalk-pc-adblock-py Ruff 단계적 도입 — S1_BASE
+# 릴리스 서명 보조 스크립트 2개. 소스 위반 0건이라 설정 고정만 수행.
+line-length = 88
+preview = false
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+fixable = []
